@@ -17,8 +17,11 @@ class Plugin extends AppPlugin {
         // Storage keys for persisting settings
         const STORAGE_KEY = 'indent-rainbow-scheme';
         const WIDTH_KEY = 'indent-rainbow-width';
+        const ACTIVE_WIDTH_KEY = 'indent-rainbow-active-width';
         const OPACITY_KEY = 'indent-rainbow-opacity';
         const ENABLED_KEY = 'indent-rainbow-enabled';
+        const THREADING_ENABLED_KEY = 'indent-rainbow-threading-enabled';
+        const THREADING_MODE_KEY = 'indent-rainbow-threading-mode';
 
         // Color schemes for different tastes
         const colorSchemes = {
@@ -99,6 +102,30 @@ class Plugin extends AppPlugin {
                     '#1f2937',  // Gray 800
                     '#f3f4f6',  // Gray 100
                 ]
+            },
+            Soot: {
+                name: 'Soot',
+                colors: [
+                    '#8c5a36',  // Toasted Oak
+                    '#5a6b6a',  // Sage/Lichen
+                    '#a65d5d',  // Dried Rose
+                    '#7a7369',  // Wet Bark
+                    '#8c7d6b',  // Driftwood
+                    '#6b7280',  // Slate Ash
+                    '#b3924d',  // Old Gold
+                    '#4a5c5c',  // Deep Spruce
+                ]
+            },
+            Amber: {
+                name: 'Amber',
+                colors: [
+                    '#ffd700',  // Gold
+                    '#ffc107',  // Amber
+                    '#ffa000',  // Dark Amber
+                    '#ff8f00',  // Light Amber
+                    '#ff7f00',  // Medium Amber
+                    '#b3924d',  // Old Gold
+                ]
             }
         };
 
@@ -113,8 +140,11 @@ class Plugin extends AppPlugin {
 
         // Get saved settings or defaults
         let currentWidth = parseInt(localStorage.getItem(WIDTH_KEY)) || 2;
+        let activeWidth = parseInt(localStorage.getItem(ACTIVE_WIDTH_KEY)) || 3;
         let currentOpacity = parseFloat(localStorage.getItem(OPACITY_KEY)) || 0.3;
         let isEnabled = localStorage.getItem(ENABLED_KEY) !== 'false'; // default true
+        let isThreadingEnabled = localStorage.getItem(THREADING_ENABLED_KEY) !== 'false'; // default true
+        let threadingMode = localStorage.getItem(THREADING_MODE_KEY) || 'staircase'; // 'staircase' or 'straight'
 
         // Opacity presets
         const opacityPresets = {
@@ -270,8 +300,11 @@ class Plugin extends AppPlugin {
 
             localStorage.setItem(STORAGE_KEY, currentScheme);
             localStorage.setItem(WIDTH_KEY, currentWidth);
+            localStorage.setItem(ACTIVE_WIDTH_KEY, activeWidth);
             localStorage.setItem(OPACITY_KEY, currentOpacity);
             localStorage.setItem(ENABLED_KEY, isEnabled);
+            localStorage.setItem(THREADING_ENABLED_KEY, isThreadingEnabled);
+            localStorage.setItem(THREADING_MODE_KEY, threadingMode);
 
             const css = generateCSS(currentScheme);
 
@@ -355,6 +388,60 @@ class Plugin extends AppPlugin {
                 node = node.parentElement;
             }
 
+            // Build helper to find thread parents
+            const getParents = (startNode) => {
+                const parents = [];
+                if (!startNode) return parents;
+
+                // Try nested structure first (Logseq or alternative Thymer structure)
+                let current = startNode.parentElement;
+                let foundNestedParents = false;
+                while (current) {
+                    const closestListitem = current.closest('.listitem');
+                    if (closestListitem) {
+                        parents.push(closestListitem);
+                        foundNestedParents = true;
+                        current = closestListitem.parentElement;
+                    } else {
+                        break;
+                    }
+                }
+                if (foundNestedParents) return parents;
+
+                // Try flat structure fallback using TreeWalker ( Thymer uses margin-left on lines )
+                const getIndentLevel = (el) => {
+                    for (const child of el.children) {
+                        if (child.classList.contains('line-div') || child.classList.contains('line-check-div')) {
+                            if (child.style.marginLeft) return parseInt(child.style.marginLeft) || 0;
+                        }
+                    }
+                    if (el.style.marginLeft) return parseInt(el.style.marginLeft) || 0;
+                    return 0;
+                };
+
+                let currentIndent = getIndentLevel(startNode);
+                if (currentIndent <= 0) return parents;
+
+                try {
+                    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, {
+                        acceptNode: (el) => (el.classList && el.classList.contains('listitem')) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP
+                    });
+                    walker.currentNode = startNode;
+                    let prev = walker.previousNode();
+                    while (prev && currentIndent > 0) {
+                        const prevIndent = getIndentLevel(prev);
+                        if (prevIndent < currentIndent) {
+                            parents.push(prev);
+                            currentIndent = prevIndent;
+                        }
+                        prev = walker.previousNode();
+                    }
+                } catch (e) {
+                    // Ignore errors
+                }
+                return parents;
+            };
+
             // Update focus class if the focused item changed
             if (node !== currentFocusedItem) {
                 if (currentFocusedItem) {
@@ -364,6 +451,67 @@ class Plugin extends AppPlugin {
                     node.classList.add('bt-focused');
                 }
                 currentFocusedItem = node;
+            }
+
+            // Always clear and redraw highlights on any layout/transform change
+            document.querySelectorAll('.bt-active-highlight').forEach(el => el.remove());
+
+            if (node && isThreadingEnabled) {
+                const parents = getParents(node);
+
+                parents.forEach((p, index) => {
+                    // Staircase targets immediate child; straight targets the completely deepest active node
+                    const targetNode = threadingMode === 'staircase'
+                        ? (index === 0 ? node : parents[index - 1])
+                        : node;
+
+                    const targetLineDiv = targetNode.querySelector('.line-div, .line-check-div') || targetNode;
+                    const targetRect = targetLineDiv.getBoundingClientRect();
+                    const targetY = targetRect.top + (targetRect.height / 2); // target middle of the bullet
+
+                    const parentLine = p.querySelector('.line-div') || p.querySelector('.line-check-div');
+                    const parentIndent = parentLine ? parentLine.querySelector('.listitem-indentline') : null;
+
+                    if (parentLine && parentIndent && parentIndent.parentElement) {
+                        const parentRect = parentIndent.getBoundingClientRect();
+                        const parentLineContainerRect = parentIndent.parentElement.getBoundingClientRect();
+
+                        // Height from top of parent's line to middle of the target item's line
+                        const height = targetY - parentRect.top;
+
+                        // Width from the parent line to the target line vertically
+                        const width = Math.max(14, targetRect.left - parentRect.left - 10);
+
+                        if (height > 0) {
+                            const highlight = document.createElement('div');
+                            highlight.className = 'bt-active-highlight';
+
+                            const style = getComputedStyle(parentIndent);
+                            const color = style.backgroundColor;
+
+                            highlight.style.position = 'absolute';
+                            highlight.style.top = (parentRect.top - parentLineContainerRect.top) + 'px';
+                            highlight.style.left = (parentRect.left - parentLineContainerRect.left) + 'px';
+                            highlight.style.width = width + 'px'; // Width of the horizontal "elbow"
+                            highlight.style.height = height + 'px';
+
+                            highlight.style.borderLeft = `${activeWidth}px solid ${color}`;
+                            highlight.style.borderBottom = `${activeWidth}px solid ${color}`;
+                            highlight.style.borderBottomLeftRadius = '6px';
+                            highlight.style.boxSizing = 'border-box';
+                            highlight.style.backgroundColor = 'transparent';
+
+                            highlight.style.zIndex = '10';
+                            highlight.style.pointerEvents = 'none';
+
+                            // Brightness and shadow exactly like focused line glow
+                            highlight.style.opacity = '1';
+                            highlight.style.filter = `brightness(1.5) drop-shadow(0 0 3px ${color})`;
+
+                            parentIndent.parentElement.appendChild(highlight);
+                        }
+                    }
+                });
             }
         };
 
@@ -456,7 +604,7 @@ class Plugin extends AppPlugin {
         });
 
         // Width commands
-        [1, 2, 3].forEach(w => {
+        [1, 2, 3, 4].forEach(w => {
             this.ui.addCommandPaletteCommand({
                 label: `Indent Rainbow: Set Width - ${w}px`,
                 icon: 'ti-arrows-horizontal',
@@ -470,6 +618,48 @@ class Plugin extends AppPlugin {
                     });
                 }
             });
+            this.ui.addCommandPaletteCommand({
+                label: `Indent Rainbow: Set Active Thread Width - ${w}px`,
+                icon: 'ti-arrows-horizontal',
+                onSelected: () => {
+                    activeWidth = w;
+                    applySettings();
+                    this.ui.showToaster({
+                        message: `Active thread width set to ${w}px`,
+                        type: 'success',
+                        duration: 1500
+                    });
+                }
+            });
+        });
+
+        // Threading Styles
+        this.ui.addCommandPaletteCommand({
+            label: 'Indent Rainbow: Toggle Threading Style (Staircase/Straight)',
+            icon: 'ti-layout-list',
+            onSelected: () => {
+                threadingMode = threadingMode === 'staircase' ? 'straight' : 'staircase';
+                applySettings();
+                this.ui.showToaster({
+                    message: `Threading style set to: ${threadingMode}`,
+                    type: 'success',
+                    duration: 1500
+                });
+            }
+        });
+
+        this.ui.addCommandPaletteCommand({
+            label: 'Indent Rainbow: Toggle Active Threading On/Off',
+            icon: 'ti-target',
+            onSelected: () => {
+                isThreadingEnabled = !isThreadingEnabled;
+                applySettings();
+                this.ui.showToaster({
+                    message: `Active thread highlighting ${isThreadingEnabled ? 'enabled' : 'disabled'}`,
+                    type: 'success',
+                    duration: 1500
+                });
+            }
         });
 
         // Opacity commands
