@@ -596,142 +596,35 @@ class Plugin extends AppPlugin {
             this.cleanupMethods.push(() => document.removeEventListener('click', clickHandler));
         }
 
-        // Add command palette commands for each color scheme
-        Object.keys(colorSchemes).forEach(schemeKey => {
-            const scheme = colorSchemes[schemeKey];
-            this.ui.addCommandPaletteCommand({
-                label: `Indent Rainbow: ${scheme.name} Theme`,
-                icon: 'ti-palette',
-                onSelected: () => {
-                    applyColorScheme(schemeKey);
-                    this.ui.showToaster({
-                        message: `Indent rainbow set to ${scheme.name} theme`,
-                        type: 'success',
-                        duration: 2000
-                    });
-                }
-            });
-        });
-
-        // Toggle command
-        this.ui.addCommandPaletteCommand({
-            label: 'Indent Rainbow: Toggle On/Off',
-            icon: 'ti-toggle-left',
-            onSelected: () => {
-                isEnabled = !isEnabled;
-                localStorage.setItem(ENABLED_KEY, isEnabled);
-                applySettings();
-                this.ui.showToaster({
-                    message: `Indent Rainbow ${isEnabled ? 'enabled' : 'disabled'}`,
-                    type: 'success',
-                    duration: 1500
-                });
-            }
-        });
-
-        // Width commands
-        [1, 2, 3, 4].forEach(w => {
-            this.ui.addCommandPaletteCommand({
-                label: `Indent Rainbow: Set Width - ${w}px`,
-                icon: 'ti-arrows-horizontal',
-                onSelected: () => {
-                    currentWidth = w;
+        // Register the panel type
+        this.ui.registerCustomPanelType("indent-rainbow-settings", (panel) => {
+            this.renderSettingsUI(panel, {
+                colorSchemes, opacityPresets,
+                getSettings: () => ({ currentScheme, currentWidth, activeWidth, currentOpacity, isEnabled, isThreadingEnabled, threadingMode }),
+                updateSettings: (newSettings) => {
+                    if (newSettings.currentScheme !== undefined) currentScheme = newSettings.currentScheme;
+                    if (newSettings.currentWidth !== undefined) currentWidth = parseInt(newSettings.currentWidth);
+                    if (newSettings.activeWidth !== undefined) activeWidth = parseInt(newSettings.activeWidth);
+                    if (newSettings.currentOpacity !== undefined) currentOpacity = parseFloat(newSettings.currentOpacity);
+                    if (newSettings.isEnabled !== undefined) isEnabled = newSettings.isEnabled;
+                    if (newSettings.isThreadingEnabled !== undefined) isThreadingEnabled = newSettings.isThreadingEnabled;
+                    if (newSettings.threadingMode !== undefined) threadingMode = newSettings.threadingMode;
                     applySettings();
-                    this.ui.showToaster({
-                        message: `Line width set to ${w}px`,
-                        type: 'success',
-                        duration: 1500
-                    });
-                }
-            });
-            this.ui.addCommandPaletteCommand({
-                label: `Indent Rainbow: Set Active Thread Width - ${w}px`,
-                icon: 'ti-arrows-horizontal',
-                onSelected: () => {
-                    activeWidth = w;
-                    applySettings();
-                    this.ui.showToaster({
-                        message: `Active thread width set to ${w}px`,
-                        type: 'success',
-                        duration: 1500
-                    });
                 }
             });
         });
 
-        // Threading Styles
-        this.ui.addCommandPaletteCommand({
-            label: 'Indent Rainbow: Toggle Threading Style (Staircase/Stretched)',
-            icon: 'ti-layout-list',
-            onSelected: () => {
-                threadingMode = threadingMode === 'staircase' ? 'stretched' : 'staircase';
-                applySettings();
-                this.ui.showToaster({
-                    message: `Threading style set to: ${threadingMode}`,
-                    type: 'success',
-                    duration: 1500
-                });
-            }
-        });
-
-        this.ui.addCommandPaletteCommand({
-            label: 'Indent Rainbow: Toggle Active Threading On/Off',
-            icon: 'ti-target',
-            onSelected: () => {
-                isThreadingEnabled = !isThreadingEnabled;
-                applySettings();
-                this.ui.showToaster({
-                    message: `Active thread highlighting ${isThreadingEnabled ? 'enabled' : 'disabled'}`,
-                    type: 'success',
-                    duration: 1500
-                });
-            }
-        });
-
-        // Opacity commands
-        Object.keys(opacityPresets).forEach(key => {
-            const preset = opacityPresets[key];
-            this.ui.addCommandPaletteCommand({
-                label: `Indent Rainbow: Opacity - ${preset.name}`,
-                icon: 'ti-brightness-half',
-                onSelected: () => {
-                    currentOpacity = preset.value;
-                    applySettings();
-                    this.ui.showToaster({
-                        message: `Opacity set to ${preset.name}`,
-                        type: 'success',
-                        duration: 1500
-                    });
+        // Add a sidebar button to launch it
+        this.ui.addSidebarItem({
+            label: "Indent Rainbow",
+            icon: "paint",
+            tooltip: "Configure Indent Rainbow",
+            onClick: async () => {
+                const newPanel = await this.ui.createPanel();
+                if (newPanel) {
+                    newPanel.navigateToCustomType("indent-rainbow-settings");
                 }
-            });
-        });
-
-        // Add status bar indicator with current theme
-        const statusBarItem = this.ui.addStatusBarItem({
-            icon: 'ti-paint',
-            label: colorSchemes[currentScheme].name,
-            tooltip: `Thymer Indent Rainbow: ${colorSchemes[currentScheme].name} theme - Click to cycle`,
-            onClick: () => {
-                // Cycle through themes
-                const schemeKeys = Object.keys(colorSchemes);
-                const currentIndex = schemeKeys.indexOf(currentScheme);
-                const nextIndex = (currentIndex + 1) % schemeKeys.length;
-                const nextScheme = schemeKeys[nextIndex];
-
-                applyColorScheme(nextScheme);
-                statusBarItem.setLabel(colorSchemes[nextScheme].name);
-                statusBarItem.setTooltip(`Thymer Indent Rainbow: ${colorSchemes[nextScheme].name} theme - Click to cycle`);
-
-                this.ui.showToaster({
-                    message: `Indent Rainbow: ${colorSchemes[nextScheme].name}`,
-                    type: 'success',
-                    duration: 1500
-                });
             }
-        });
-
-        this.cleanupMethods.push(() => {
-            statusBarItem.remove(); // if Thymer SDK supports it, clean up status bar
         });
     }
 
@@ -759,6 +652,130 @@ class Plugin extends AppPlugin {
         const styleElement = document.querySelector('style[data-source="thymer-indent-rainbow"]');
         if (styleElement) {
             styleElement.remove();
+        }
+    }
+
+    renderSettingsUI(panel, api) {
+        const settings = api.getSettings();
+
+        let schemeOptionsHtml = Object.keys(api.colorSchemes).map(key =>
+            `<option value="${key}" ${settings.currentScheme === key ? 'selected' : ''}>${api.colorSchemes[key].name}</option>`
+        ).join('');
+
+        let opacityOptionsHtml = Object.keys(api.opacityPresets).map(key =>
+            `<option value="${api.opacityPresets[key].value}" ${settings.currentOpacity == api.opacityPresets[key].value ? 'selected' : ''}>${api.opacityPresets[key].name}</option>`
+        ).join('');
+
+        const html = `
+            <div class="pm-container" style="padding: 20px; color: var(--text-color); font-family: var(--font-m); max-width: 600px; margin: 0 auto;">
+                <div class="pm-header" style="margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">
+                    <h2 style="margin: 0; display: flex; align-items: center; gap: 8px;">
+                        <i class="ti-paint"></i> Indent Rainbow Settings
+                    </h2>
+                </div>
+
+                <div class="pm-card" style="padding: 15px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-secondary); margin-bottom: 15px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px;">
+                        <div>
+                            <strong style="display: block;">Enable Indent Rainbow</strong>
+                            <span style="font-size: 0.85em; color: var(--text-color-secondary);">Toggle the plugin on or off completely.</span>
+                        </div>
+                        <input type="checkbox" id="ir-enable" ${settings.isEnabled ? 'checked' : ''} style="width: 18px; height: 18px; accent-color: var(--primary-color); cursor: pointer;">
+                    </div>
+
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px;"><strong>Color Scheme</strong></label>
+                        <select id="ir-scheme" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-color); cursor: pointer;">
+                            ${schemeOptionsHtml}
+                        </select>
+                    </div>
+
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px;"><strong>Opacity</strong></label>
+                        <select id="ir-opacity" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-color); cursor: pointer;">
+                            ${opacityOptionsHtml}
+                        </select>
+                    </div>
+
+                    <div style="margin-bottom: 15px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <label><strong>Line Width</strong></label>
+                            <span id="ir-width-val">${settings.currentWidth}px</span>
+                        </div>
+                        <input type="range" id="ir-width" min="1" max="4" step="1" value="${settings.currentWidth}" style="width: 100%; accent-color: var(--primary-color); cursor: pointer;">
+                    </div>
+                </div>
+
+                <div class="pm-card" style="padding: 15px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-secondary);">
+                    <h3 style="margin-top: 0; margin-bottom: 15px; display: flex; align-items: center; gap: 8px;">
+                        <i class="ti-target"></i> Active Threading
+                    </h3>
+                    
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px;">
+                        <div>
+                            <strong style="display: block;">Enable Thread Highlighting</strong>
+                            <span style="font-size: 0.85em; color: var(--text-color-secondary);">Highlight the path to the currently focused item.</span>
+                        </div>
+                        <input type="checkbox" id="ir-thread-enable" ${settings.isThreadingEnabled ? 'checked' : ''} style="width: 18px; height: 18px; accent-color: var(--primary-color); cursor: pointer;">
+                    </div>
+
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px;"><strong>Threading Style</strong></label>
+                        <select id="ir-thread-style" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-color); cursor: pointer;">
+                            <option value="staircase" ${settings.threadingMode === 'staircase' ? 'selected' : ''}>Staircase (Follows indentation path)</option>
+                            <option value="stretched" ${settings.threadingMode === 'stretched' ? 'selected' : ''}>Stretched (Direct line from parent)</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <label><strong>Active Thread Width</strong></label>
+                            <span id="ir-active-width-val">${settings.activeWidth}px</span>
+                        </div>
+                        <input type="range" id="ir-active-width" min="1" max="4" step="1" value="${settings.activeWidth}" style="width: 100%; accent-color: var(--primary-color); cursor: pointer;">
+                    </div>
+                </div>
+            </div>
+        `;
+
+        const element = panel.getElement();
+        if (element) {
+            element.innerHTML = html;
+
+            // Bind events
+            element.querySelector('#ir-enable').addEventListener('change', (e) => {
+                api.updateSettings({ isEnabled: e.target.checked });
+            });
+
+            element.querySelector('#ir-scheme').addEventListener('change', (e) => {
+                api.updateSettings({ currentScheme: e.target.value });
+            });
+
+            element.querySelector('#ir-opacity').addEventListener('change', (e) => {
+                api.updateSettings({ currentOpacity: e.target.value });
+            });
+
+            const widthSlider = element.querySelector('#ir-width');
+            const widthVal = element.querySelector('#ir-width-val');
+            widthSlider.addEventListener('input', (e) => {
+                widthVal.textContent = e.target.value + 'px';
+                api.updateSettings({ currentWidth: e.target.value });
+            });
+
+            element.querySelector('#ir-thread-enable').addEventListener('change', (e) => {
+                api.updateSettings({ isThreadingEnabled: e.target.checked });
+            });
+
+            element.querySelector('#ir-thread-style').addEventListener('change', (e) => {
+                api.updateSettings({ threadingMode: e.target.value });
+            });
+
+            const activeWidthSlider = element.querySelector('#ir-active-width');
+            const activeWidthVal = element.querySelector('#ir-active-width-val');
+            activeWidthSlider.addEventListener('input', (e) => {
+                activeWidthVal.textContent = e.target.value + 'px';
+                api.updateSettings({ activeWidth: e.target.value });
+            });
         }
     }
 }
