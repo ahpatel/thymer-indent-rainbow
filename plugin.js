@@ -596,29 +596,36 @@ class Plugin extends AppPlugin {
             this.cleanupMethods.push(() => document.removeEventListener('click', clickHandler));
         }
 
+        // Shared update function – applies settings and keeps the status bar tooltip in sync
+        let statusBarItem = null;
+        const updateSettings = (newSettings) => {
+            if (newSettings.currentScheme !== undefined) currentScheme = newSettings.currentScheme;
+            if (newSettings.currentWidth !== undefined) currentWidth = parseInt(newSettings.currentWidth);
+            if (newSettings.activeWidth !== undefined) activeWidth = parseInt(newSettings.activeWidth);
+            if (newSettings.currentOpacity !== undefined) currentOpacity = parseFloat(newSettings.currentOpacity);
+            if (newSettings.isEnabled !== undefined) isEnabled = newSettings.isEnabled;
+            if (newSettings.isThreadingEnabled !== undefined) isThreadingEnabled = newSettings.isThreadingEnabled;
+            if (newSettings.threadingMode !== undefined) threadingMode = newSettings.threadingMode;
+            applySettings();
+            if (statusBarItem && typeof statusBarItem.setTooltip === 'function') {
+                statusBarItem.setTooltip(`Indent Rainbow – ${colorSchemes[currentScheme]?.name ?? currentScheme}`);
+            }
+        };
+
         // Register the panel type
         this.ui.registerCustomPanelType("indent-rainbow-settings", (panel) => {
             this.renderSettingsUI(panel, {
                 colorSchemes, opacityPresets,
                 getSettings: () => ({ currentScheme, currentWidth, activeWidth, currentOpacity, isEnabled, isThreadingEnabled, threadingMode }),
-                updateSettings: (newSettings) => {
-                    if (newSettings.currentScheme !== undefined) currentScheme = newSettings.currentScheme;
-                    if (newSettings.currentWidth !== undefined) currentWidth = parseInt(newSettings.currentWidth);
-                    if (newSettings.activeWidth !== undefined) activeWidth = parseInt(newSettings.activeWidth);
-                    if (newSettings.currentOpacity !== undefined) currentOpacity = parseFloat(newSettings.currentOpacity);
-                    if (newSettings.isEnabled !== undefined) isEnabled = newSettings.isEnabled;
-                    if (newSettings.isThreadingEnabled !== undefined) isThreadingEnabled = newSettings.isThreadingEnabled;
-                    if (newSettings.threadingMode !== undefined) threadingMode = newSettings.threadingMode;
-                    applySettings();
-                }
+                updateSettings,
+                createIcon: (name) => this.ui.createIcon(name)
             });
         });
 
-        // Add a sidebar button to launch it
-        this.ui.addSidebarItem({
-            label: "Indent Rainbow",
+        // Add a status bar button (icon only; theme name is in the tooltip)
+        statusBarItem = this.ui.addStatusBarItem({
             icon: "paint",
-            tooltip: "Configure Indent Rainbow",
+            tooltip: `Indent Rainbow – ${colorSchemes[currentScheme]?.name ?? currentScheme}`,
             onClick: async () => {
                 const newPanel = await this.ui.createPanel();
                 if (newPanel) {
@@ -626,6 +633,7 @@ class Plugin extends AppPlugin {
                 }
             }
         });
+
     }
 
     onUnload() {
@@ -667,72 +675,91 @@ class Plugin extends AppPlugin {
         ).join('');
 
         const html = `
-            <div class="pm-container" style="padding: 20px; color: var(--text-color); font-family: var(--font-m); max-width: 600px; margin: 0 auto;">
-                <div class="pm-header" style="margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">
-                    <h2 style="margin: 0; display: flex; align-items: center; gap: 8px;">
-                        <i class="ti-paint"></i> Indent Rainbow Settings
-                    </h2>
+            <style>
+                .ir-settings * { box-sizing: border-box; }
+                .ir-settings { padding: 24px; max-width: 600px; margin: 0 auto; font-family: var(--font-m, inherit); color: var(--text-color); }
+                .ir-header { margin-bottom: 24px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; }
+                .ir-title { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 1.5em; font-weight: 600; }
+                .ir-card { padding: 20px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-secondary, var(--background-secondary)); margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+                .ir-card h3 { margin-top: 0; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; font-size: 1.1em; font-weight: 600; }
+                .ir-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+                .ir-row:last-child { margin-bottom: 0; }
+                .ir-label-group { display: flex; flex-direction: column; gap: 4px; }
+                .ir-label-group strong { font-weight: 500; }
+                .ir-subtitle { font-size: 0.85em; color: var(--text-color-secondary, #808080); }
+                .ir-input { width: 100%; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-primary, var(--background-primary)); color: var(--text-color); font-family: inherit; transition: border-color 0.2s; }
+                .ir-input:focus { outline: none; border-color: var(--primary-color, #0066ff); }
+                .ir-checkbox { width: 18px; height: 18px; accent-color: var(--primary-color, #0066ff); cursor: pointer; }
+                .ir-range { width: 100%; accent-color: var(--primary-color, #0066ff); cursor: pointer; margin-top: 8px; }
+            </style>
+            <div class="ir-settings">
+                <div class="ir-header">
+                    <h2 class="ir-title" id="ir-main-title">Indent Rainbow Settings</h2>
                 </div>
 
-                <div class="pm-card" style="padding: 15px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-secondary); margin-bottom: 15px;">
-                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px;">
-                        <div>
-                            <strong style="display: block;">Enable Indent Rainbow</strong>
-                            <span style="font-size: 0.85em; color: var(--text-color-secondary);">Toggle the plugin on or off completely.</span>
+                <div class="ir-card">
+                    <div class="ir-row">
+                        <div class="ir-label-group">
+                            <strong>Enable Indent Rainbow</strong>
+                            <span class="ir-subtitle">Toggle the plugin on or off completely.</span>
                         </div>
-                        <input type="checkbox" id="ir-enable" ${settings.isEnabled ? 'checked' : ''} style="width: 18px; height: 18px; accent-color: var(--primary-color); cursor: pointer;">
+                        <input type="checkbox" id="ir-enable" class="ir-checkbox" ${settings.isEnabled ? 'checked' : ''}>
                     </div>
 
-                    <div style="margin-bottom: 15px;">
-                        <label style="display: block; margin-bottom: 5px;"><strong>Color Scheme</strong></label>
-                        <select id="ir-scheme" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-color); cursor: pointer;">
+                    <div style="margin-bottom: 16px;">
+                        <div class="ir-label-group" style="margin-bottom: 8px;">
+                            <strong>Color Scheme</strong>
+                        </div>
+                        <select id="ir-scheme" class="ir-input cursor-pointer">
                             ${schemeOptionsHtml}
                         </select>
                     </div>
 
-                    <div style="margin-bottom: 15px;">
-                        <label style="display: block; margin-bottom: 5px;"><strong>Opacity</strong></label>
-                        <select id="ir-opacity" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-color); cursor: pointer;">
+                    <div style="margin-bottom: 16px;">
+                        <div class="ir-label-group" style="margin-bottom: 8px;">
+                            <strong>Opacity</strong>
+                        </div>
+                        <select id="ir-opacity" class="ir-input cursor-pointer">
                             ${opacityOptionsHtml}
                         </select>
                     </div>
 
-                    <div style="margin-bottom: 15px;">
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                            <label><strong>Line Width</strong></label>
-                            <span id="ir-width-val">${settings.currentWidth}px</span>
+                    <div>
+                        <div class="ir-row" style="margin-bottom: 0;">
+                            <strong>Line Width</strong>
+                            <span id="ir-width-val" style="font-weight: 500; color: var(--primary-color, #0066ff);">${settings.currentWidth}px</span>
                         </div>
-                        <input type="range" id="ir-width" min="1" max="4" step="1" value="${settings.currentWidth}" style="width: 100%; accent-color: var(--primary-color); cursor: pointer;">
+                        <input type="range" id="ir-width" class="ir-range" min="1" max="4" step="1" value="${settings.currentWidth}">
                     </div>
                 </div>
 
-                <div class="pm-card" style="padding: 15px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-secondary);">
-                    <h3 style="margin-top: 0; margin-bottom: 15px; display: flex; align-items: center; gap: 8px;">
-                        <i class="ti-target"></i> Active Threading
-                    </h3>
+                <div class="ir-card">
+                    <h3 id="ir-thread-title">Active Threading</h3>
                     
-                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px;">
-                        <div>
-                            <strong style="display: block;">Enable Thread Highlighting</strong>
-                            <span style="font-size: 0.85em; color: var(--text-color-secondary);">Highlight the path to the currently focused item.</span>
+                    <div class="ir-row">
+                        <div class="ir-label-group">
+                            <strong>Enable Thread Highlighting</strong>
+                            <span class="ir-subtitle">Highlight the path to the currently focused item.</span>
                         </div>
-                        <input type="checkbox" id="ir-thread-enable" ${settings.isThreadingEnabled ? 'checked' : ''} style="width: 18px; height: 18px; accent-color: var(--primary-color); cursor: pointer;">
+                        <input type="checkbox" id="ir-thread-enable" class="ir-checkbox" ${settings.isThreadingEnabled ? 'checked' : ''}>
                     </div>
 
-                    <div style="margin-bottom: 15px;">
-                        <label style="display: block; margin-bottom: 5px;"><strong>Threading Style</strong></label>
-                        <select id="ir-thread-style" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-color); cursor: pointer;">
+                    <div style="margin-bottom: 16px;">
+                        <div class="ir-label-group" style="margin-bottom: 8px;">
+                            <strong>Threading Style</strong>
+                        </div>
+                        <select id="ir-thread-style" class="ir-input cursor-pointer">
                             <option value="staircase" ${settings.threadingMode === 'staircase' ? 'selected' : ''}>Staircase (Follows indentation path)</option>
                             <option value="stretched" ${settings.threadingMode === 'stretched' ? 'selected' : ''}>Stretched (Direct line from parent)</option>
                         </select>
                     </div>
 
                     <div>
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                            <label><strong>Active Thread Width</strong></label>
-                            <span id="ir-active-width-val">${settings.activeWidth}px</span>
+                        <div class="ir-row" style="margin-bottom: 0;">
+                            <strong>Active Thread Width</strong>
+                            <span id="ir-active-width-val" style="font-weight: 500; color: var(--primary-color, #0066ff);">${settings.activeWidth}px</span>
                         </div>
-                        <input type="range" id="ir-active-width" min="1" max="4" step="1" value="${settings.activeWidth}" style="width: 100%; accent-color: var(--primary-color); cursor: pointer;">
+                        <input type="range" id="ir-active-width" class="ir-range" min="1" max="4" step="1" value="${settings.activeWidth}">
                     </div>
                 </div>
             </div>
@@ -741,6 +768,13 @@ class Plugin extends AppPlugin {
         const element = panel.getElement();
         if (element) {
             element.innerHTML = html;
+
+            // Prepend icons using the UI SDK so they render correctly
+            const mainTitle = element.querySelector('#ir-main-title');
+            if (mainTitle) mainTitle.insertBefore(api.createIcon('paint'), mainTitle.firstChild);
+
+            const threadTitle = element.querySelector('#ir-thread-title');
+            if (threadTitle) threadTitle.insertBefore(api.createIcon('target'), threadTitle.firstChild);
 
             // Bind events
             element.querySelector('#ir-enable').addEventListener('change', (e) => {
