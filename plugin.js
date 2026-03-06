@@ -339,6 +339,7 @@ class Plugin extends AppPlugin {
         let rafPending = false;
         let virtualInputWrapper = null;
         let lastTransform = '';  // Cache to skip redundant updates
+        let activeHighlights = []; // Cache highlight elements for faster cleanup
 
         // O(1) lookup for navigation keys
         const NAV_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Backspace', 'Tab']);
@@ -456,8 +457,13 @@ class Plugin extends AppPlugin {
                 currentFocusedItem = node;
             }
 
-            // Clean up old highlights
-            document.querySelectorAll('.bt-active-highlight').forEach(el => el.remove());
+            // Clean up old highlights efficiently
+            if (activeHighlights.length > 0) {
+                for (const h of activeHighlights) {
+                    if (h.parentElement) h.parentElement.removeChild(h);
+                }
+                activeHighlights = [];
+            }
 
             if (!node || !isThreadingEnabled) return;
 
@@ -467,72 +473,72 @@ class Plugin extends AppPlugin {
             // Optional: check if node is detached from DOM or hidden
             if (!document.body.contains(node) || node.offsetParent === null) return;
 
-            // To avoid reflows in the loop, we could batch reads and writes, 
-            // but for a single branch path it's usually < 10 items, so inline is fine.
-            const highlightsToInsert = [];
+            // Batch reads to avoid layout thrashing (Read Phase)
+            const targetLineDiv = node.querySelector('.line-div, .line-check-div') || node;
+            const targetRect = targetLineDiv.getBoundingClientRect();
+            if (targetRect.height === 0) return;
 
-            parents.forEach((p, index) => {
-                // Staircase targets immediate child; stretched targets the completely deepest active node
-                const targetNode = threadingMode === 'staircase'
+            const targetY = targetRect.top + (targetRect.height / 2);
+
+            const highlightData = parents.map((p, index) => {
+                const targetPointNode = threadingMode === 'staircase'
                     ? (index === 0 ? node : parents[index - 1])
                     : node;
 
-                const targetLineDiv = targetNode.querySelector('.line-div, .line-check-div') || targetNode;
-                const targetRect = targetLineDiv.getBoundingClientRect();
+                const tLineDiv = targetPointNode.querySelector('.line-div, .line-check-div') || targetPointNode;
+                const tRect = tLineDiv.getBoundingClientRect();
+                if (tRect.height === 0) return null;
 
-                // If element has no height (hidden/collapsed display mode), ignore
-                if (targetRect.height === 0) return;
+                const tY = tRect.top + (tRect.height / 2);
 
-                const targetY = targetRect.top + (targetRect.height / 2); // target middle of the bullet
+                const pLine = p.querySelector('.line-div') || p.querySelector('.line-check-div');
+                const pIndent = pLine ? pLine.querySelector('.listitem-indentline') : null;
 
-                const parentLine = p.querySelector('.line-div') || p.querySelector('.line-check-div');
-                const parentIndent = parentLine ? parentLine.querySelector('.listitem-indentline') : null;
+                if (pLine && pIndent && pIndent.parentElement) {
+                    const pRect = pIndent.getBoundingClientRect();
+                    const pContainerRect = pIndent.parentElement.getBoundingClientRect();
 
-                if (parentLine && parentIndent && parentIndent.parentElement) {
-                    const parentRect = parentIndent.getBoundingClientRect();
-                    const parentLineContainerRect = parentIndent.parentElement.getBoundingClientRect();
+                    const h = tY - pRect.top;
+                    const w = Math.max(14, tRect.left - pRect.left - 10);
 
-                    // Height from top of parent's line to middle of the target item's line
-                    const height = targetY - parentRect.top;
-
-                    // Width from the parent line to the target line vertically
-                    const width = Math.max(14, targetRect.left - parentRect.left - 10);
-
-                    // Only draw if we have a positive height (it's physically below the parent)
-                    // and parent is actually visible
-                    if (height > 0 && parentRect.height > 0) {
-                        const highlight = document.createElement('div');
-                        highlight.className = 'bt-active-highlight';
-
-                        const style = getComputedStyle(parentIndent);
-                        const color = style.backgroundColor;
-
-                        highlight.style.position = 'absolute';
-                        highlight.style.top = (parentRect.top - parentLineContainerRect.top) + 'px';
-                        highlight.style.left = (parentRect.left - parentLineContainerRect.left) + 'px';
-                        highlight.style.width = width + 'px'; // Width of the horizontal "elbow"
-                        highlight.style.height = height + 'px';
-
-                        highlight.style.borderLeft = `${activeWidth}px solid ${color}`;
-                        highlight.style.borderBottom = `${activeWidth}px solid ${color}`;
-                        highlight.style.borderBottomLeftRadius = '6px';
-                        highlight.style.boxSizing = 'border-box';
-                        highlight.style.backgroundColor = 'transparent';
-
-                        highlight.style.zIndex = '10';
-                        highlight.style.pointerEvents = 'none';
-
-                        highlight.style.opacity = '1';
-                        highlight.style.willChange = 'opacity, filter'; // Hint browser
-                        highlight.style.filter = `brightness(1.5) drop-shadow(0 0 3px ${color})`;
-
-                        highlightsToInsert.push({ parent: parentIndent.parentElement, el: highlight });
+                    if (h > 0 && pRect.height > 0) {
+                        return {
+                            parent: pIndent.parentElement,
+                            top: (pRect.top - pContainerRect.top),
+                            left: (pRect.left - pContainerRect.left),
+                            width: w,
+                            height: h,
+                            color: getComputedStyle(pIndent).backgroundColor
+                        };
                     }
                 }
-            });
+                return null;
+            }).filter(Boolean);
 
-            // Batch writes to avoid layout thrashing
-            highlightsToInsert.forEach(h => h.parent.appendChild(h.el));
+            // Write Phase
+            for (const data of highlightData) {
+                const highlight = document.createElement('div');
+                highlight.className = 'bt-active-highlight';
+                highlight.style.cssText = `
+                    position: absolute;
+                    top: ${data.top}px;
+                    left: ${data.left}px;
+                    width: ${data.width}px;
+                    height: ${data.height}px;
+                    border-left: ${activeWidth}px solid ${data.color};
+                    border-bottom: ${activeWidth}px solid ${data.color};
+                    border-bottom-left-radius: 6px;
+                    box-sizing: border-box;
+                    background-color: transparent;
+                    z-index: 10;
+                    pointer-events: none;
+                    opacity: 1;
+                    will-change: opacity, filter;
+                    filter: brightness(1.5) drop-shadow(0 0 3px ${data.color});
+                `;
+                data.parent.appendChild(highlight);
+                activeHighlights.push(highlight);
+            }
         };
 
         const scheduleUpdate = () => {
@@ -555,9 +561,14 @@ class Plugin extends AppPlugin {
 
             // Observe style attribute changes on the virtual input wrapper
             const observer = new MutationObserver((mutations) => {
+                // Check if any mutation actually changed the transform
                 for (const mutation of mutations) {
                     if (mutation.attributeName === 'style') {
-                        scheduleUpdate();
+                        const newTransform = virtualInputWrapper.style.transform;
+                        if (newTransform !== lastTransform) {
+                            scheduleUpdate();
+                            break;
+                        }
                     }
                 }
             });
@@ -634,6 +645,18 @@ class Plugin extends AppPlugin {
             }
         });
 
+        // Add a command to the Command Palette
+        this.ui.addCommandPaletteCommand({
+            label: "Indent Rainbow: Settings",
+            icon: "paint",
+            onSelected: async () => {
+                const newPanel = await this.ui.createPanel();
+                if (newPanel) {
+                    newPanel.navigateToCustomType("indent-rainbow-settings");
+                }
+            }
+        });
+
     }
 
     onUnload() {
@@ -649,12 +672,12 @@ class Plugin extends AppPlugin {
             this.cleanupMethods = [];
         }
 
-        // Manually destroy appended UI artifacts
-        const existingHighlights = document.querySelectorAll('.bt-active-highlight');
-        existingHighlights.forEach(el => el.remove());
+        // Clean up focus markers and highlights
+        const highlights = document.querySelectorAll('.bt-active-highlight');
+        highlights.forEach(el => el.remove());
 
-        const focused = document.querySelectorAll('.bt-focused');
-        focused.forEach(el => el.classList.remove('bt-focused'));
+        const focusedElements = document.querySelectorAll('.bt-focused');
+        focusedElements.forEach(el => el.classList.remove('bt-focused'));
 
         // Delete style element injected into <head>
         const styleElement = document.querySelector('style[data-source="thymer-indent-rainbow"]');
@@ -663,153 +686,331 @@ class Plugin extends AppPlugin {
         }
     }
 
+    escHtml(str) {
+        if (!str) return '';
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
     renderSettingsUI(panel, api) {
         const settings = api.getSettings();
-
-        let schemeOptionsHtml = Object.keys(api.colorSchemes).map(key =>
-            `<option value="${key}" ${settings.currentScheme === key ? 'selected' : ''}>${api.colorSchemes[key].name}</option>`
-        ).join('');
-
-        let opacityOptionsHtml = Object.keys(api.opacityPresets).map(key =>
-            `<option value="${api.opacityPresets[key].value}" ${settings.currentOpacity == api.opacityPresets[key].value ? 'selected' : ''}>${api.opacityPresets[key].name}</option>`
-        ).join('');
-
-        const html = `
-            <style>
-                .ir-settings * { box-sizing: border-box; }
-                .ir-settings { padding: 24px; max-width: 600px; margin: 0 auto; font-family: var(--font-m, inherit); color: var(--text-color); }
-                .ir-header { margin-bottom: 24px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; }
-                .ir-title { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 1.5em; font-weight: 600; }
-                .ir-card { padding: 20px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-secondary, var(--background-secondary)); margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-                .ir-card h3 { margin-top: 0; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; font-size: 1.1em; font-weight: 600; }
-                .ir-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-                .ir-row:last-child { margin-bottom: 0; }
-                .ir-label-group { display: flex; flex-direction: column; gap: 4px; }
-                .ir-label-group strong { font-weight: 500; }
-                .ir-subtitle { font-size: 0.85em; color: var(--text-color-secondary, #808080); }
-                .ir-input { width: 100%; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-primary, var(--background-primary)); color: var(--text-color); font-family: inherit; transition: border-color 0.2s; }
-                .ir-input:focus { outline: none; border-color: var(--primary-color, #0066ff); }
-                .ir-checkbox { width: 18px; height: 18px; accent-color: var(--primary-color, #0066ff); cursor: pointer; }
-                .ir-range { width: 100%; accent-color: var(--primary-color, #0066ff); cursor: pointer; margin-top: 8px; }
-            </style>
-            <div class="ir-settings">
-                <div class="ir-header">
-                    <h2 class="ir-title" id="ir-main-title">Indent Rainbow Settings</h2>
-                </div>
-
-                <div class="ir-card">
-                    <div class="ir-row">
-                        <div class="ir-label-group">
-                            <strong>Enable Indent Rainbow</strong>
-                            <span class="ir-subtitle">Toggle the plugin on or off completely.</span>
-                        </div>
-                        <input type="checkbox" id="ir-enable" class="ir-checkbox" ${settings.isEnabled ? 'checked' : ''}>
-                    </div>
-
-                    <div style="margin-bottom: 16px;">
-                        <div class="ir-label-group" style="margin-bottom: 8px;">
-                            <strong>Color Scheme</strong>
-                        </div>
-                        <select id="ir-scheme" class="ir-input cursor-pointer">
-                            ${schemeOptionsHtml}
-                        </select>
-                    </div>
-
-                    <div style="margin-bottom: 16px;">
-                        <div class="ir-label-group" style="margin-bottom: 8px;">
-                            <strong>Opacity</strong>
-                        </div>
-                        <select id="ir-opacity" class="ir-input cursor-pointer">
-                            ${opacityOptionsHtml}
-                        </select>
-                    </div>
-
-                    <div>
-                        <div class="ir-row" style="margin-bottom: 0;">
-                            <strong>Line Width</strong>
-                            <span id="ir-width-val" style="font-weight: 500; color: var(--primary-color, #0066ff);">${settings.currentWidth}px</span>
-                        </div>
-                        <input type="range" id="ir-width" class="ir-range" min="1" max="4" step="1" value="${settings.currentWidth}">
-                    </div>
-                </div>
-
-                <div class="ir-card">
-                    <h3 id="ir-thread-title">Active Threading</h3>
-                    
-                    <div class="ir-row">
-                        <div class="ir-label-group">
-                            <strong>Enable Thread Highlighting</strong>
-                            <span class="ir-subtitle">Highlight the path to the currently focused item.</span>
-                        </div>
-                        <input type="checkbox" id="ir-thread-enable" class="ir-checkbox" ${settings.isThreadingEnabled ? 'checked' : ''}>
-                    </div>
-
-                    <div style="margin-bottom: 16px;">
-                        <div class="ir-label-group" style="margin-bottom: 8px;">
-                            <strong>Threading Style</strong>
-                        </div>
-                        <select id="ir-thread-style" class="ir-input cursor-pointer">
-                            <option value="staircase" ${settings.threadingMode === 'staircase' ? 'selected' : ''}>Staircase (Follows indentation path)</option>
-                            <option value="stretched" ${settings.threadingMode === 'stretched' ? 'selected' : ''}>Stretched (Direct line from parent)</option>
-                        </select>
-                    </div>
-
-                    <div>
-                        <div class="ir-row" style="margin-bottom: 0;">
-                            <strong>Active Thread Width</strong>
-                            <span id="ir-active-width-val" style="font-weight: 500; color: var(--primary-color, #0066ff);">${settings.activeWidth}px</span>
-                        </div>
-                        <input type="range" id="ir-active-width" class="ir-range" min="1" max="4" step="1" value="${settings.activeWidth}">
-                    </div>
-                </div>
-            </div>
-        `;
-
         const element = panel.getElement();
-        if (element) {
-            element.innerHTML = html;
+        if (!element) return;
 
-            // Prepend icons using the UI SDK so they render correctly
-            const mainTitle = element.querySelector('#ir-main-title');
-            if (mainTitle) mainTitle.insertBefore(api.createIcon('paint'), mainTitle.firstChild);
+        element.innerHTML = ''; // Clear previous content
 
-            const threadTitle = element.querySelector('#ir-thread-title');
-            if (threadTitle) threadTitle.insertBefore(api.createIcon('target'), threadTitle.firstChild);
+        // Add styles using theme variables
+        const style = document.createElement('style');
+        style.textContent = `
+            .ir-settings * { box-sizing: border-box; }
+            .ir-settings { 
+                --ir-accent: var(--theme-accent, var(--button-primary-bg-color, var(--cmdpal-selected-bg-color, var(--color-primary-400, #3b82f6))));
+                --ir-accent-subtle: var(--theme-accent-subtle, rgba(59, 130, 246, 0.15));
+                --ir-text: var(--theme-text-primary, var(--color-text-100, #fff));
+                --ir-text-secondary: var(--theme-text-secondary, var(--color-text-500, #888));
+                --ir-bg: var(--theme-background-secondary, var(--color-bg-700, #1e1e2e));
+                --ir-border: var(--theme-border, var(--color-bg-500, #333));
+                --ir-input-bg: var(--input-bg-color, var(--theme-background-primary, var(--color-bg-800, #111)));
+                
+                padding: 32px; 
+                max-width: 650px; 
+                margin: 0 auto; 
+                font-family: var(--font-m, var(--font-primary, inherit)); 
+                color: var(--ir-text);
+                line-height: 1.5;
+            }
+            .ir-header { 
+                margin-bottom: 32px; 
+                border-bottom: 1px solid var(--ir-border); 
+                padding-bottom: 16px; 
+            }
+            .ir-title { 
+                margin: 0; 
+                display: flex; 
+                align-items: center; 
+                gap: 12px; 
+                font-size: 1.75em; 
+                font-weight: 700; 
+                color: var(--ir-accent); 
+            }
+            .ir-card { 
+                padding: 24px; 
+                border-radius: 12px; 
+                border: 1px solid var(--ir-border); 
+                background: var(--ir-bg); 
+                margin-bottom: 24px; 
+                box-shadow: var(--color-shadow-cards, 0 4px 6px rgba(0,0,0,0.1)); 
+            }
+            .ir-card h3 { 
+                margin-top: 0; 
+                margin-bottom: 20px; 
+                display: flex; 
+                align-items: center; 
+                gap: 10px; 
+                font-size: 1.2em; 
+                font-weight: 600; 
+                color: var(--ir-text); 
+            }
+            .ir-row { 
+                display: flex; 
+                align-items: center; 
+                gap: 16px;
+                justify-content: space-between; 
+                margin-bottom: 20px; 
+            }
+            .ir-row:last-child { margin-bottom: 0; }
+            .ir-label-group { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+            .ir-label-group strong { font-weight: 600; color: var(--ir-text); }
+            .ir-subtitle { font-size: 0.9em; color: var(--ir-text-secondary); opacity: 0.8; }
+            .ir-input { 
+                width: 100%; 
+                padding: 10px 14px; 
+                border-radius: 8px; 
+                border: 1px solid var(--ir-border); 
+                background: var(--ir-input-bg); 
+                color: var(--ir-text); 
+                font-family: inherit; 
+                font-size: 0.95em;
+                transition: border-color 0.2s, box-shadow 0.2s; 
+                cursor: pointer;
+            }
+            .ir-input:focus { 
+                outline: none; 
+                border-color: var(--ir-accent) !important; 
+                box-shadow: 0 0 0 2px var(--ir-accent-subtle); 
+            }
+            .ir-checkbox { 
+                width: 22px; 
+                height: 22px; 
+                accent-color: var(--ir-accent) !important; 
+                cursor: pointer; 
+                border-radius: 6px;
+                background-color: var(--ir-input-bg) !important;
+                border: 2px solid var(--ir-border);
+                appearance: auto; /* Fallback to native themed if possible */
+                -webkit-appearance: checkbox;
+            }
+            .ir-range { 
+                width: 100%; 
+                cursor: pointer; 
+                margin-top: 12px; 
+                height: 6px;
+                border-radius: 3px;
+                background: var(--ir-border) !important;
+                appearance: none;
+                -webkit-appearance: none;
+                outline: none;
+            }
+            .ir-range::-webkit-slider-thumb {
+                height: 20px;
+                width: 20px;
+                border-radius: 50%;
+                background: var(--ir-accent) !important;
+                cursor: pointer;
+                appearance: none;
+                -webkit-appearance: none;
+                margin-top: -7px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+                border: 2px solid var(--ir-bg);
+            }
+            .ir-range::-moz-range-thumb {
+                height: 20px;
+                width: 20px;
+                border-radius: 50%;
+                background: var(--ir-accent) !important;
+                cursor: pointer;
+                border: 2px solid var(--ir-bg);
+                box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            }
+            .ir-val-text { 
+                font-weight: 700; 
+                color: var(--ir-accent); 
+                background: var(--ir-accent-subtle);
+                padding: 2px 10px;
+                border-radius: 6px;
+                font-size: 0.9em;
+                min-width: 45px;
+                text-align: center;
+            }
+        `;
+        element.appendChild(style);
 
-            // Bind events
-            element.querySelector('#ir-enable').addEventListener('change', (e) => {
-                api.updateSettings({ isEnabled: e.target.checked });
-            });
+        const container = document.createElement('div');
+        container.className = 'ir-settings';
 
-            element.querySelector('#ir-scheme').addEventListener('change', (e) => {
-                api.updateSettings({ currentScheme: e.target.value });
-            });
+        // Header
+        const header = document.createElement('div');
+        header.className = 'ir-header';
+        const title = document.createElement('h2');
+        title.className = 'ir-title';
+        title.appendChild(api.createIcon('paint'));
+        title.appendChild(document.createTextNode(' Indent Rainbow Settings'));
+        header.appendChild(title);
+        container.appendChild(header);
 
-            element.querySelector('#ir-opacity').addEventListener('change', (e) => {
-                api.updateSettings({ currentOpacity: e.target.value });
-            });
+        // General Card
+        const genCard = document.createElement('div');
+        genCard.className = 'ir-card';
 
-            const widthSlider = element.querySelector('#ir-width');
-            const widthVal = element.querySelector('#ir-width-val');
-            widthSlider.addEventListener('input', (e) => {
-                widthVal.textContent = e.target.value + 'px';
-                api.updateSettings({ currentWidth: e.target.value });
-            });
+        // Scheme Select
+        const schemeGroup = document.createElement('div');
+        schemeGroup.style.marginBottom = '16px';
+        const schemeLabel = document.createElement('div');
+        schemeLabel.className = 'ir-label-group';
+        schemeLabel.style.marginBottom = '8px';
+        const schemeStrong = document.createElement('strong');
+        schemeStrong.textContent = 'Color Scheme';
+        schemeLabel.appendChild(schemeStrong);
+        schemeGroup.appendChild(schemeLabel);
+        const schemeSelect = document.createElement('select');
+        schemeSelect.className = 'ir-input cursor-pointer';
+        Object.keys(api.colorSchemes).forEach(key => {
+            const opt = document.createElement('option');
+            opt.value = key;
+            opt.textContent = api.colorSchemes[key].name;
+            opt.selected = settings.currentScheme === key;
+            schemeSelect.appendChild(opt);
+        });
+        schemeSelect.addEventListener('change', (e) => api.updateSettings({ currentScheme: e.target.value }));
+        schemeGroup.appendChild(schemeSelect);
+        genCard.appendChild(schemeGroup);
 
-            element.querySelector('#ir-thread-enable').addEventListener('change', (e) => {
-                api.updateSettings({ isThreadingEnabled: e.target.checked });
-            });
+        // Opacity Select
+        const opacityGroup = document.createElement('div');
+        opacityGroup.style.marginBottom = '16px';
+        const opacityLabel = document.createElement('div');
+        opacityLabel.className = 'ir-label-group';
+        opacityLabel.style.marginBottom = '8px';
+        const opacityStrong = document.createElement('strong');
+        opacityStrong.textContent = 'Opacity';
+        opacityLabel.appendChild(opacityStrong);
+        opacityGroup.appendChild(opacityLabel);
+        const opacitySelect = document.createElement('select');
+        opacitySelect.className = 'ir-input cursor-pointer';
+        Object.keys(api.opacityPresets).forEach(key => {
+            const opt = document.createElement('option');
+            opt.value = api.opacityPresets[key].value;
+            opt.textContent = api.opacityPresets[key].name;
+            opt.selected = settings.currentOpacity == api.opacityPresets[key].value;
+            opacitySelect.appendChild(opt);
+        });
+        opacitySelect.addEventListener('change', (e) => api.updateSettings({ currentOpacity: e.target.value }));
+        opacityGroup.appendChild(opacitySelect);
+        genCard.appendChild(opacityGroup);
 
-            element.querySelector('#ir-thread-style').addEventListener('change', (e) => {
-                api.updateSettings({ threadingMode: e.target.value });
-            });
+        // Line Width Slider
+        const widthGroup = document.createElement('div');
+        const widthRow = document.createElement('div');
+        widthRow.className = 'ir-row';
+        widthRow.style.marginBottom = '0';
+        const widthStrong = document.createElement('strong');
+        widthStrong.textContent = 'Line Width';
+        widthRow.appendChild(widthStrong);
+        const widthVal = document.createElement('span');
+        widthVal.className = 'ir-val-text';
+        widthVal.textContent = settings.currentWidth + 'px';
+        widthRow.appendChild(widthVal);
+        widthGroup.appendChild(widthRow);
+        const widthSlider = document.createElement('input');
+        widthSlider.type = 'range';
+        widthSlider.className = 'ir-range';
+        widthSlider.min = '1';
+        widthSlider.max = '4';
+        widthSlider.step = '1';
+        widthSlider.value = settings.currentWidth;
+        widthSlider.addEventListener('input', (e) => {
+            widthVal.textContent = e.target.value + 'px';
+            api.updateSettings({ currentWidth: e.target.value });
+        });
+        widthGroup.appendChild(widthSlider);
+        genCard.appendChild(widthGroup);
 
-            const activeWidthSlider = element.querySelector('#ir-active-width');
-            const activeWidthVal = element.querySelector('#ir-active-width-val');
-            activeWidthSlider.addEventListener('input', (e) => {
-                activeWidthVal.textContent = e.target.value + 'px';
-                api.updateSettings({ activeWidth: e.target.value });
-            });
-        }
+        container.appendChild(genCard);
+
+        // Threading Card
+        const threadCard = document.createElement('div');
+        threadCard.className = 'ir-card';
+        const threadTitle = document.createElement('h3');
+        threadTitle.appendChild(api.createIcon('target'));
+        threadTitle.appendChild(document.createTextNode(' Active Threading'));
+        threadCard.appendChild(threadTitle);
+
+        // Thread Enable Toggle
+        const threadEnableRow = document.createElement('div');
+        threadEnableRow.className = 'ir-row';
+        const threadEnableLabelGroup = document.createElement('div');
+        threadEnableLabelGroup.className = 'ir-label-group';
+        const threadEnableStrong = document.createElement('strong');
+        threadEnableStrong.textContent = 'Enable Thread Highlighting';
+        threadEnableLabelGroup.appendChild(threadEnableStrong);
+        const threadEnableSubtitle = document.createElement('span');
+        threadEnableSubtitle.className = 'ir-subtitle';
+        threadEnableSubtitle.textContent = 'Highlight the path to the currently focused item.';
+        threadEnableLabelGroup.appendChild(threadEnableSubtitle);
+        threadEnableRow.appendChild(threadEnableLabelGroup);
+        const threadEnableCheck = document.createElement('input');
+        threadEnableCheck.type = 'checkbox';
+        threadEnableCheck.className = 'ir-checkbox';
+        threadEnableCheck.checked = settings.isThreadingEnabled;
+        threadEnableCheck.addEventListener('change', (e) => api.updateSettings({ isThreadingEnabled: e.target.checked }));
+        threadEnableRow.appendChild(threadEnableCheck);
+        threadCard.appendChild(threadEnableRow);
+
+        // Threading Style Select
+        const threadStyleGroup = document.createElement('div');
+        threadStyleGroup.style.marginBottom = '16px';
+        const threadStyleLabel = document.createElement('div');
+        threadStyleLabel.className = 'ir-label-group';
+        threadStyleLabel.style.marginBottom = '8px';
+        const threadStyleStrong = document.createElement('strong');
+        threadStyleStrong.textContent = 'Threading Style';
+        threadStyleLabel.appendChild(threadStyleStrong);
+        threadStyleGroup.appendChild(threadStyleLabel);
+        const threadStyleSelect = document.createElement('select');
+        threadStyleSelect.className = 'ir-input cursor-pointer';
+        const optStaircase = document.createElement('option');
+        optStaircase.value = 'staircase';
+        optStaircase.textContent = 'Staircase (Follows indentation path)';
+        optStaircase.selected = settings.threadingMode === 'staircase';
+        threadStyleSelect.appendChild(optStaircase);
+        const optStretched = document.createElement('option');
+        optStretched.value = 'stretched';
+        optStretched.textContent = 'Stretched (Direct line from parent)';
+        optStretched.selected = settings.threadingMode === 'stretched';
+        threadStyleSelect.appendChild(optStretched);
+        threadStyleSelect.addEventListener('change', (e) => api.updateSettings({ threadingMode: e.target.value }));
+        threadStyleGroup.appendChild(threadStyleSelect);
+        threadCard.appendChild(threadStyleGroup);
+
+        // Active Thread Width Slider
+        const aWidthGroup = document.createElement('div');
+        const aWidthRow = document.createElement('div');
+        aWidthRow.className = 'ir-row';
+        aWidthRow.style.marginBottom = '0';
+        const aWidthStrong = document.createElement('strong');
+        aWidthStrong.textContent = 'Active Thread Width';
+        aWidthRow.appendChild(aWidthStrong);
+        const aWidthVal = document.createElement('span');
+        aWidthVal.className = 'ir-val-text';
+        aWidthVal.textContent = settings.activeWidth + 'px';
+        aWidthRow.appendChild(aWidthVal);
+        aWidthGroup.appendChild(aWidthRow);
+        const aWidthSlider = document.createElement('input');
+        aWidthSlider.type = 'range';
+        aWidthSlider.className = 'ir-range';
+        aWidthSlider.min = '1';
+        aWidthSlider.max = '4';
+        aWidthSlider.step = '1';
+        aWidthSlider.value = settings.activeWidth;
+        aWidthSlider.addEventListener('input', (e) => {
+            aWidthVal.textContent = e.target.value + 'px';
+            api.updateSettings({ activeWidth: e.target.value });
+        });
+        aWidthGroup.appendChild(aWidthSlider);
+        threadCard.appendChild(aWidthGroup);
+
+        container.appendChild(threadCard);
+        element.appendChild(container);
     }
 }
