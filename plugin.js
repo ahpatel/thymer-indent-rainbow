@@ -14,8 +14,11 @@
 
 class Plugin extends AppPlugin {
     onLoad() {
+        this.isUnloaded = false;
+        
         // Keep track of resources to clean up later
         this.cleanupMethods = [];
+        this.styleElement = null;
 
         // Storage keys for persisting settings
         const STORAGE_KEY = 'indent-rainbow-scheme';
@@ -23,7 +26,6 @@ class Plugin extends AppPlugin {
         const ACTIVE_WIDTH_KEY = 'indent-rainbow-active-width';
         const OPACITY_KEY = 'indent-rainbow-opacity';
         const ENABLED_KEY = 'indent-rainbow-enabled';
-        const THREADING_ENABLED_KEY = 'indent-rainbow-threading-enabled';
         const THREADING_MODE_KEY = 'indent-rainbow-threading-mode';
 
         // Color schemes for different tastes
@@ -138,15 +140,15 @@ class Plugin extends AppPlugin {
             currentScheme = 'rainbow';
         }
 
-        // Reference to injected style element
-        let styleElement = null;
-
         // Get saved settings or defaults
-        let currentWidth = parseInt(localStorage.getItem(WIDTH_KEY)) || 2;
-        let activeWidth = parseInt(localStorage.getItem(ACTIVE_WIDTH_KEY)) || 3;
+        let savedWidth = parseInt(localStorage.getItem(WIDTH_KEY));
+        let currentWidth = isNaN(savedWidth) ? 1 : savedWidth;
+        
+        let savedActiveWidth = parseInt(localStorage.getItem(ACTIVE_WIDTH_KEY));
+        let activeWidth = isNaN(savedActiveWidth) ? 2 : savedActiveWidth;
+        
         let currentOpacity = parseFloat(localStorage.getItem(OPACITY_KEY)) || 0.3;
         let isEnabled = localStorage.getItem(ENABLED_KEY) !== 'false'; // default true
-        let isThreadingEnabled = localStorage.getItem(THREADING_ENABLED_KEY) !== 'false'; // default true
         let threadingMode = localStorage.getItem(THREADING_MODE_KEY) || 'staircase'; // 'staircase' or 'stretched'
 
         // Opacity presets
@@ -306,15 +308,14 @@ class Plugin extends AppPlugin {
             localStorage.setItem(ACTIVE_WIDTH_KEY, activeWidth);
             localStorage.setItem(OPACITY_KEY, currentOpacity);
             localStorage.setItem(ENABLED_KEY, isEnabled);
-            localStorage.setItem(THREADING_ENABLED_KEY, isThreadingEnabled);
             localStorage.setItem(THREADING_MODE_KEY, threadingMode);
 
             const css = generateCSS(currentScheme);
 
-            if (styleElement) {
-                styleElement.textContent = css;
+            if (this.styleElement) {
+                this.styleElement.textContent = css;
             } else {
-                styleElement = this.ui.injectCSS(css);
+                this.styleElement = this.ui.injectCSS(css);
             }
         };
 
@@ -344,7 +345,70 @@ class Plugin extends AppPlugin {
         // O(1) lookup for navigation keys
         const NAV_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Backspace', 'Tab']);
 
+        const cleanHighlights = () => {
+            while (activeHighlights.length > 0) {
+                const h = activeHighlights.pop();
+                if (h.parentElement) h.parentElement.removeChild(h);
+            }
+        };
+
+        // Helper to find thread parents (moved out of updateFocusedItem to save memory)
+        const getParents = (startNode) => {
+            const parents = [];
+            if (!startNode) return parents;
+
+            // Try nested structure first (Logseq or alternative Thymer structure)
+            let current = startNode.parentElement;
+            let foundNestedParents = false;
+            while (current) {
+                const closestListitem = current.closest('.listitem');
+                if (closestListitem) {
+                    parents.push(closestListitem);
+                    foundNestedParents = true;
+                    current = closestListitem.parentElement;
+                } else {
+                    break;
+                }
+            }
+            if (foundNestedParents) return parents;
+
+            // Try flat structure fallback using TreeWalker ( Thymer uses margin-left on lines )
+            const getIndentLevel = (el) => {
+                for (let i = 0; i < el.children.length; i++) {
+                    const child = el.children[i];
+                    if (child.classList.contains('line-div') || child.classList.contains('line-check-div')) {
+                        if (child.style.marginLeft) return parseInt(child.style.marginLeft) || 0;
+                    }
+                }
+                if (el.style.marginLeft) return parseInt(el.style.marginLeft) || 0;
+                return 0;
+            };
+
+            let currentIndent = getIndentLevel(startNode);
+            if (currentIndent <= 0) return parents;
+
+            try {
+                const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, {
+                    acceptNode: (el) => (el.classList && el.classList.contains('listitem')) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP
+                });
+                walker.currentNode = startNode;
+                let prev = walker.previousNode();
+                while (prev && currentIndent > 0) {
+                    const prevIndent = getIndentLevel(prev);
+                    if (prevIndent < currentIndent) {
+                        parents.push(prev);
+                        currentIndent = prevIndent;
+                    }
+                    prev = walker.previousNode();
+                }
+            } catch (e) {
+                // Ignore errors
+            }
+            return parents;
+        };
+
         const updateFocusedItem = () => {
+            if (this.isUnloaded) return;
             rafPending = false;
 
             // Find the virtual input wrapper if not cached
@@ -366,8 +430,8 @@ class Plugin extends AppPlugin {
             lastTransform = style;
 
             const match = style.match(/translate\(([^,]+)px,\s*([^)]+)px\)/);
-
             if (!match) {
+                cleanHighlights();
                 return;
             }
 
@@ -378,75 +442,66 @@ class Plugin extends AppPlugin {
             // Add a small offset to ensure we hit the line content area
             const element = document.elementFromPoint(x + 50, y + 10);
 
-            if (!element) {
-                if (currentFocusedItem) {
-                    currentFocusedItem.classList.remove('bt-focused');
-                    currentFocusedItem = null;
-                }
-                return;
-            }
-
             // Walk up to find parent .listitem
-            let node = element;
-            while (node && !node.classList?.contains('listitem')) {
-                node = node.parentElement;
+            let node = null;
+            if (element) {
+                node = element;
+                while (node && !node.classList?.contains('listitem')) {
+                    node = node.parentElement;
+                }
             }
 
-            // Build helper to find thread parents
-            const getParents = (startNode) => {
-                const parents = [];
-                if (!startNode) return parents;
+            // --- READ PHASE --- (Avoid layout thrashing)
+            const highlightData = [];
+            
+            if (node && document.body.contains(node) && node.offsetParent !== null) {
+                const parents = getParents(node);
+                
+                if (parents.length > 0) {
+                    const targetLineDiv = node.querySelector('.line-div, .line-check-div') || node;
+                    const targetRect = targetLineDiv.getBoundingClientRect();
+                    
+                    if (targetRect.height > 0) {
+                        for (let index = 0; index < parents.length; index++) {
+                            const p = parents[index];
+                            const targetPointNode = threadingMode === 'staircase'
+                                ? (index === 0 ? node : parents[index - 1])
+                                : node;
 
-                // Try nested structure first (Logseq or alternative Thymer structure)
-                let current = startNode.parentElement;
-                let foundNestedParents = false;
-                while (current) {
-                    const closestListitem = current.closest('.listitem');
-                    if (closestListitem) {
-                        parents.push(closestListitem);
-                        foundNestedParents = true;
-                        current = closestListitem.parentElement;
-                    } else {
-                        break;
-                    }
-                }
-                if (foundNestedParents) return parents;
+                            const tLineDiv = targetPointNode.querySelector('.line-div, .line-check-div') || targetPointNode;
+                            const tRect = tLineDiv.getBoundingClientRect();
+                            if (tRect.height === 0) continue;
 
-                // Try flat structure fallback using TreeWalker ( Thymer uses margin-left on lines )
-                const getIndentLevel = (el) => {
-                    for (const child of el.children) {
-                        if (child.classList.contains('line-div') || child.classList.contains('line-check-div')) {
-                            if (child.style.marginLeft) return parseInt(child.style.marginLeft) || 0;
+                            const tY = tRect.top + (tRect.height / 2);
+
+                            const pLine = p.querySelector('.line-div') || p.querySelector('.line-check-div');
+                            const pIndent = pLine ? pLine.querySelector('.listitem-indentline') : null;
+
+                            if (pLine && pIndent && pIndent.parentElement) {
+                                const pRect = pIndent.getBoundingClientRect();
+                                const pContainerRect = pIndent.parentElement.getBoundingClientRect();
+
+                                const h = tY - pRect.top;
+                                const w = Math.max(14, tRect.left - pRect.left - 10);
+
+                                if (h > 0 && pRect.height > 0) {
+                                    highlightData.push({
+                                        parent: pIndent.parentElement,
+                                        top: (pRect.top - pContainerRect.top),
+                                        left: (pRect.left - pContainerRect.left),
+                                        width: w,
+                                        height: h,
+                                        color: getComputedStyle(pIndent).backgroundColor
+                                    });
+                                }
+                            }
                         }
                     }
-                    if (el.style.marginLeft) return parseInt(el.style.marginLeft) || 0;
-                    return 0;
-                };
-
-                let currentIndent = getIndentLevel(startNode);
-                if (currentIndent <= 0) return parents;
-
-                try {
-                    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, {
-                        acceptNode: (el) => (el.classList && el.classList.contains('listitem')) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP
-                    });
-                    walker.currentNode = startNode;
-                    let prev = walker.previousNode();
-                    while (prev && currentIndent > 0) {
-                        const prevIndent = getIndentLevel(prev);
-                        if (prevIndent < currentIndent) {
-                            parents.push(prev);
-                            currentIndent = prevIndent;
-                        }
-                        prev = walker.previousNode();
-                    }
-                } catch (e) {
-                    // Ignore errors
                 }
-                return parents;
-            };
+            }
 
-            // Update focus class if the focused item changed
+            // --- WRITE PHASE ---
+            // Update focus class
             if (node !== currentFocusedItem) {
                 if (currentFocusedItem) {
                     currentFocusedItem.classList.remove('bt-focused');
@@ -457,68 +512,24 @@ class Plugin extends AppPlugin {
                 currentFocusedItem = node;
             }
 
-            // Clean up old highlights efficiently
-            if (activeHighlights.length > 0) {
-                for (const h of activeHighlights) {
-                    if (h.parentElement) h.parentElement.removeChild(h);
-                }
-                activeHighlights = [];
-            }
-
-            if (!node || !isThreadingEnabled) return;
-
-            const parents = getParents(node);
-            if (!parents || parents.length === 0) return;
-
-            // Optional: check if node is detached from DOM or hidden
-            if (!document.body.contains(node) || node.offsetParent === null) return;
-
-            // Batch reads to avoid layout thrashing (Read Phase)
-            const targetLineDiv = node.querySelector('.line-div, .line-check-div') || node;
-            const targetRect = targetLineDiv.getBoundingClientRect();
-            if (targetRect.height === 0) return;
-
-            const targetY = targetRect.top + (targetRect.height / 2);
-
-            const highlightData = parents.map((p, index) => {
-                const targetPointNode = threadingMode === 'staircase'
-                    ? (index === 0 ? node : parents[index - 1])
-                    : node;
-
-                const tLineDiv = targetPointNode.querySelector('.line-div, .line-check-div') || targetPointNode;
-                const tRect = tLineDiv.getBoundingClientRect();
-                if (tRect.height === 0) return null;
-
-                const tY = tRect.top + (tRect.height / 2);
-
-                const pLine = p.querySelector('.line-div') || p.querySelector('.line-check-div');
-                const pIndent = pLine ? pLine.querySelector('.listitem-indentline') : null;
-
-                if (pLine && pIndent && pIndent.parentElement) {
-                    const pRect = pIndent.getBoundingClientRect();
-                    const pContainerRect = pIndent.parentElement.getBoundingClientRect();
-
-                    const h = tY - pRect.top;
-                    const w = Math.max(14, tRect.left - pRect.left - 10);
-
-                    if (h > 0 && pRect.height > 0) {
-                        return {
-                            parent: pIndent.parentElement,
-                            top: (pRect.top - pContainerRect.top),
-                            left: (pRect.left - pContainerRect.left),
-                            width: w,
-                            height: h,
-                            color: getComputedStyle(pIndent).backgroundColor
-                        };
+            // Write Phase: Recycle elements to improve performance
+            for (let i = 0; i < highlightData.length; i++) {
+                const data = highlightData[i];
+                let highlight;
+                
+                if (i < activeHighlights.length) {
+                    highlight = activeHighlights[i];
+                    if (highlight.parentElement !== data.parent) {
+                        highlight.parentElement?.removeChild(highlight);
+                        data.parent.appendChild(highlight);
                     }
+                } else {
+                    highlight = document.createElement('div');
+                    highlight.className = 'bt-active-highlight';
+                    data.parent.appendChild(highlight);
+                    activeHighlights.push(highlight);
                 }
-                return null;
-            }).filter(Boolean);
 
-            // Write Phase
-            for (const data of highlightData) {
-                const highlight = document.createElement('div');
-                highlight.className = 'bt-active-highlight';
                 highlight.style.cssText = `
                     position: absolute;
                     top: ${data.top}px;
@@ -536,8 +547,12 @@ class Plugin extends AppPlugin {
                     will-change: opacity, filter;
                     filter: brightness(1.5) drop-shadow(0 0 3px ${data.color});
                 `;
-                data.parent.appendChild(highlight);
-                activeHighlights.push(highlight);
+            }
+
+            // Remove any excess highlights that are no longer needed
+            while (activeHighlights.length > highlightData.length) {
+                const h = activeHighlights.pop();
+                if (h.parentElement) h.parentElement.removeChild(h);
             }
         };
 
@@ -551,11 +566,13 @@ class Plugin extends AppPlugin {
 
         // Watch for changes to the virtual input wrapper's style (transform)
         const setupObserver = () => {
+            if (this.isUnloaded) return;
+            
             virtualInputWrapper = document.getElementById('virtualinput-wrapper');
 
             if (!virtualInputWrapper) {
                 // Retry until the wrapper exists
-                setTimeout(setupObserver, 100);
+                this.observerTimeout = setTimeout(setupObserver, 100);
                 return;
             }
 
@@ -609,13 +626,21 @@ class Plugin extends AppPlugin {
 
         // Shared update function – applies settings and keeps the status bar tooltip in sync
         let statusBarItem = null;
+        
+        // Ensure closed-over DOM references are released on unload
+        this.cleanupMethods.push(() => {
+            virtualInputWrapper = null;
+            currentFocusedItem = null;
+            activeHighlights.length = 0;
+            statusBarItem = null;
+        });
+
         const updateSettings = (newSettings) => {
             if (newSettings.currentScheme !== undefined) currentScheme = newSettings.currentScheme;
             if (newSettings.currentWidth !== undefined) currentWidth = parseInt(newSettings.currentWidth);
             if (newSettings.activeWidth !== undefined) activeWidth = parseInt(newSettings.activeWidth);
             if (newSettings.currentOpacity !== undefined) currentOpacity = parseFloat(newSettings.currentOpacity);
             if (newSettings.isEnabled !== undefined) isEnabled = newSettings.isEnabled;
-            if (newSettings.isThreadingEnabled !== undefined) isThreadingEnabled = newSettings.isThreadingEnabled;
             if (newSettings.threadingMode !== undefined) threadingMode = newSettings.threadingMode;
             applySettings();
             if (statusBarItem && typeof statusBarItem.setTooltip === 'function') {
@@ -627,7 +652,7 @@ class Plugin extends AppPlugin {
         this.ui.registerCustomPanelType("indent-rainbow-settings", (panel) => {
             this.renderSettingsUI(panel, {
                 colorSchemes, opacityPresets,
-                getSettings: () => ({ currentScheme, currentWidth, activeWidth, currentOpacity, isEnabled, isThreadingEnabled, threadingMode }),
+                getSettings: () => ({ currentScheme, currentWidth, activeWidth, currentOpacity, isEnabled, threadingMode }),
                 updateSettings,
                 createIcon: (name) => this.ui.createIcon(name)
             });
@@ -660,6 +685,9 @@ class Plugin extends AppPlugin {
     }
 
     onUnload() {
+        this.isUnloaded = true;
+        if (this.observerTimeout) clearTimeout(this.observerTimeout);
+
         // Remove globally bound event listeners and unobserve mutation observers
         if (this.cleanupMethods) {
             this.cleanupMethods.forEach(cleanupFn => {
@@ -679,18 +707,16 @@ class Plugin extends AppPlugin {
         const focusedElements = document.querySelectorAll('.bt-focused');
         focusedElements.forEach(el => el.classList.remove('bt-focused'));
 
-        // Delete style element injected into <head>
-        const styleElement = document.querySelector('style[data-source="thymer-indent-rainbow"]');
-        if (styleElement) {
-            styleElement.remove();
+        // Delete style element
+        if (this.styleElement) {
+            this.styleElement.remove();
+            this.styleElement = null;
+        } else {
+            const fallbackStyleElement = document.querySelector('style[data-source="thymer-indent-rainbow"]');
+            if (fallbackStyleElement) {
+                fallbackStyleElement.remove();
+            }
         }
-    }
-
-    escHtml(str) {
-        if (!str) return '';
-        const div = document.createElement('div');
-        div.textContent = str;
-        return div.innerHTML;
     }
 
     renderSettingsUI(panel, api) {
@@ -915,7 +941,7 @@ class Plugin extends AppPlugin {
         const widthSlider = document.createElement('input');
         widthSlider.type = 'range';
         widthSlider.className = 'ir-range';
-        widthSlider.min = '1';
+        widthSlider.min = '0';
         widthSlider.max = '4';
         widthSlider.step = '1';
         widthSlider.value = settings.currentWidth;
@@ -935,27 +961,6 @@ class Plugin extends AppPlugin {
         threadTitle.appendChild(api.createIcon('target'));
         threadTitle.appendChild(document.createTextNode(' Active Threading'));
         threadCard.appendChild(threadTitle);
-
-        // Thread Enable Toggle
-        const threadEnableRow = document.createElement('div');
-        threadEnableRow.className = 'ir-row';
-        const threadEnableLabelGroup = document.createElement('div');
-        threadEnableLabelGroup.className = 'ir-label-group';
-        const threadEnableStrong = document.createElement('strong');
-        threadEnableStrong.textContent = 'Enable Thread Highlighting';
-        threadEnableLabelGroup.appendChild(threadEnableStrong);
-        const threadEnableSubtitle = document.createElement('span');
-        threadEnableSubtitle.className = 'ir-subtitle';
-        threadEnableSubtitle.textContent = 'Highlight the path to the currently focused item.';
-        threadEnableLabelGroup.appendChild(threadEnableSubtitle);
-        threadEnableRow.appendChild(threadEnableLabelGroup);
-        const threadEnableCheck = document.createElement('input');
-        threadEnableCheck.type = 'checkbox';
-        threadEnableCheck.className = 'ir-checkbox';
-        threadEnableCheck.checked = settings.isThreadingEnabled;
-        threadEnableCheck.addEventListener('change', (e) => api.updateSettings({ isThreadingEnabled: e.target.checked }));
-        threadEnableRow.appendChild(threadEnableCheck);
-        threadCard.appendChild(threadEnableRow);
 
         // Threading Style Select
         const threadStyleGroup = document.createElement('div');
@@ -999,7 +1004,7 @@ class Plugin extends AppPlugin {
         const aWidthSlider = document.createElement('input');
         aWidthSlider.type = 'range';
         aWidthSlider.className = 'ir-range';
-        aWidthSlider.min = '1';
+        aWidthSlider.min = '0';
         aWidthSlider.max = '4';
         aWidthSlider.step = '1';
         aWidthSlider.value = settings.activeWidth;
