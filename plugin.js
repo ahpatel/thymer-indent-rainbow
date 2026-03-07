@@ -197,28 +197,39 @@ class Plugin extends AppPlugin {
 
 /* Ensure task and bullet indent lines have minimum height as safety net */
 .listitem-task .listitem-indentline,
-.listitem-ulist .listitem-indentline {
+.listitem-ulist .listitem-indentline,
+.listitem-olist .listitem-indentline {
     min-height: 20px !important;
+}
+
+/* Nudge bullet indent line right so it sits under the bullet dot center */
+.listitem-ulist .listitem-indentline {
+    transform: translateX(calc(var(--bullet-size) / 2)) !important;
 }
 
 /* Ensure indent lines are visible for all item types */
 .listitem-text .listitem-indentline,
 .listitem-task .listitem-indentline,
-.listitem-ulist .listitem-indentline {
+.listitem-ulist .listitem-indentline,
+.listitem-olist .listitem-indentline {
     display: block !important;
     visibility: visible !important;
 }
 
 /* Highlight on hover - make the line darker/brighter */
 .listitem:hover > .line-div > .listitem-indentline,
-.listitem:hover > .line-check-div ~ .line-div > .listitem-indentline {
+.listitem:hover > .line-check-div ~ .line-div > .listitem-indentline,
+.listitem:hover > .line-bullet-div ~ .line-div > .listitem-indentline,
+.listitem:hover > .line-number-div ~ .line-div > .listitem-indentline {
     opacity: var(--bt-line-opacity-hover) !important;
     filter: brightness(1.2) !important;
 }
 
 /* Highlight on focus (cursor position) - strongest emphasis */
 .bt-focused > .line-div > .listitem-indentline,
-.bt-focused > .line-check-div ~ .line-div > .listitem-indentline {
+.bt-focused > .line-check-div ~ .line-div > .listitem-indentline,
+.bt-focused > .line-bullet-div ~ .line-div > .listitem-indentline,
+.bt-focused > .line-number-div ~ .line-div > .listitem-indentline {
     opacity: 1 !important;
     filter: brightness(1.3) drop-shadow(0 0 2px currentColor) !important;
 }
@@ -245,7 +256,11 @@ class Plugin extends AppPlugin {
 
 /* Task items - margin is on line-check-div, color the sibling line-div's indent line */
 .line-check-div[style*="margin-left: ${marginLeft}px"] ~ .line-div > .listitem-indentline,
-.line-check-div[style*="margin-left:${marginLeft}px"] ~ .line-div > .listitem-indentline {
+.line-check-div[style*="margin-left:${marginLeft}px"] ~ .line-div > .listitem-indentline,
+.line-bullet-div[style*="margin-left: ${marginLeft}px"] ~ .line-div > .listitem-indentline,
+.line-bullet-div[style*="margin-left:${marginLeft}px"] ~ .line-div > .listitem-indentline,
+.line-number-div[style*="margin-left: ${marginLeft}px"] ~ .line-div > .listitem-indentline,
+.line-number-div[style*="margin-left:${marginLeft}px"] ~ .line-div > .listitem-indentline {
     background-color: ${color} !important;
     border-color: ${color} !important;
 }
@@ -376,11 +391,9 @@ class Plugin extends AppPlugin {
             const getIndentLevel = (el) => {
                 for (let i = 0; i < el.children.length; i++) {
                     const child = el.children[i];
-                    if (child.classList.contains('line-div') || child.classList.contains('line-check-div')) {
-                        if (child.style.marginLeft) return parseInt(child.style.marginLeft) || 0;
-                    }
+                    if (child.style && child.style.marginLeft) return parseInt(child.style.marginLeft) || 0;
                 }
-                if (el.style.marginLeft) return parseInt(el.style.marginLeft) || 0;
+                if (el.style && el.style.marginLeft) return parseInt(el.style.marginLeft) || 0;
                 return 0;
             };
 
@@ -458,7 +471,7 @@ class Plugin extends AppPlugin {
                 const parents = getParents(node);
                 
                 if (parents.length > 0) {
-                    const targetLineDiv = node.querySelector('.line-div, .line-check-div') || node;
+                    const targetLineDiv = node.querySelector('.line-div') || node;
                     const targetRect = targetLineDiv.getBoundingClientRect();
                     
                     if (targetRect.height > 0) {
@@ -468,21 +481,34 @@ class Plugin extends AppPlugin {
                                 ? (index === 0 ? node : parents[index - 1])
                                 : node;
 
-                            const tLineDiv = targetPointNode.querySelector('.line-div, .line-check-div') || targetPointNode;
+                            const tLineDiv = targetPointNode.querySelector('.line-div') || targetPointNode;
                             const tRect = tLineDiv.getBoundingClientRect();
                             if (tRect.height === 0) continue;
 
                             const tY = tRect.top + (tRect.height / 2);
 
-                            const pLine = p.querySelector('.line-div') || p.querySelector('.line-check-div');
-                            const pIndent = pLine ? pLine.querySelector('.listitem-indentline') : null;
+                            const pIndent = p.querySelector('.listitem-indentline');
+                            const pLine = pIndent ? pIndent.parentElement : null;
 
                             if (pLine && pIndent && pIndent.parentElement) {
                                 const pRect = pIndent.getBoundingClientRect();
                                 const pContainerRect = pIndent.parentElement.getBoundingClientRect();
 
                                 const h = tY - pRect.top;
-                                const w = Math.max(14, tRect.left - pRect.left - 10);
+
+                                // Find the left edge of the first child of the target node
+                                // that carries a margin-left (the prefix: number/bullet/checkbox).
+                                // That is the natural endpoint for the horizontal arm.
+                                // Fall back to .line-div left if no such child exists.
+                                let armEndX = tRect.left - 5;
+                                for (let ci = 0; ci < targetPointNode.children.length; ci++) {
+                                    const ch = targetPointNode.children[ci];
+                                    if (ch.style && ch.style.marginLeft && parseInt(ch.style.marginLeft) > 0) {
+                                        armEndX = ch.getBoundingClientRect().left;
+                                        break;
+                                    }
+                                }
+                                const w = Math.max(14, armEndX - pRect.left);
 
                                 if (h > 0 && pRect.height > 0) {
                                     highlightData.push({
@@ -604,6 +630,117 @@ class Plugin extends AppPlugin {
         // Start observing
         setupObserver();
 
+        // =====================================================
+        // JS-driven coloring for ulist / olist items
+        // =====================================================
+        // CSS selectors can't color these because the element that
+        // carries margin-left varies between Thymer versions/builds.
+        // Instead, we scan all direct children for any margin-left
+        // and apply the matching rainbow color directly.
+
+        const getListItemColor = (item, colors) => {
+            let marginLeft = 0;
+            for (let i = 0; i < item.children.length; i++) {
+                const child = item.children[i];
+                if (child.style && child.style.marginLeft) {
+                    marginLeft = parseInt(child.style.marginLeft) || 0;
+                    break;
+                }
+            }
+            if (marginLeft === 0 && item.style && item.style.marginLeft) {
+                marginLeft = parseInt(item.style.marginLeft) || 0;
+            }
+            if (marginLeft <= 0) return null;
+            const level = Math.floor(marginLeft / 30);
+            return colors[level % colors.length];
+        };
+
+        const applyListColors = () => {
+            if (!isEnabled) return;
+            const colors = colorSchemes[currentScheme].colors;
+            const items = document.querySelectorAll('.listitem-ulist, .listitem-olist');
+            for (const item of items) {
+                // Find the first child with margin-left (the prefix: bullet/number marker)
+                let marginLeft = 0;
+                let prefixEl = null;
+                for (let i = 0; i < item.children.length; i++) {
+                    const child = item.children[i];
+                    if (child.style && child.style.marginLeft) {
+                        const ml = parseInt(child.style.marginLeft) || 0;
+                        if (ml > 0) { marginLeft = ml; prefixEl = child; break; }
+                    }
+                }
+                if (marginLeft === 0 && item.style && item.style.marginLeft) {
+                    marginLeft = parseInt(item.style.marginLeft) || 0;
+                }
+
+                const indentLine = item.querySelector('.listitem-indentline');
+                if (!indentLine) continue;
+
+                if (marginLeft > 0) {
+                    const level = Math.floor(marginLeft / 30);
+                    const color = colors[level % colors.length];
+                    indentLine.style.setProperty('background-color', color, 'important');
+                    indentLine.style.setProperty('border-color', color, 'important');
+                    indentLine.dataset.btManaged = '1';
+                } else if (indentLine.dataset.btManaged) {
+                    indentLine.style.removeProperty('background-color');
+                    indentLine.style.removeProperty('border-color');
+                    delete indentLine.dataset.btManaged;
+                }
+            }
+        };
+
+        const clearListColors = () => {
+            const lines = document.querySelectorAll('.listitem-indentline[data-bt-managed]');
+            for (const line of lines) {
+                line.style.removeProperty('background-color');
+                line.style.removeProperty('border-color');
+                delete line.dataset.btManaged;
+            }
+        };
+
+        // One-shot diagnostic: logs the class names of children of the first
+        // bullet/numbered item so we can see the actual Thymer DOM structure.
+        let diagnosticDone = false;
+        const runDiagnostic = () => {
+            if (diagnosticDone) return;
+            const ulist = document.querySelector('.listitem-ulist');
+            const olist = document.querySelector('.listitem-olist');
+            if (ulist || olist) {
+                diagnosticDone = true;
+                [['ulist', ulist], ['olist', olist]].forEach(([type, item]) => {
+                    if (!item) return;
+                    const children = Array.from(item.children).map(c =>
+                        `<${c.tagName.toLowerCase()} class="${c.className}" margin="${c.style.marginLeft || ''}">`);
+                    console.log(`[IndentRainbow] ${type} DOM children: ${children.join(' | ')}`);
+                    console.log(`[IndentRainbow] ${type} outerHTML (first 600): ${item.outerHTML.substring(0, 600)}`);
+                });
+            }
+        };
+
+        let listColorRafPending = false;
+        const scheduleListColorUpdate = () => {
+            if (!listColorRafPending) {
+                listColorRafPending = true;
+                requestAnimationFrame(() => {
+                    listColorRafPending = false;
+                    applyListColors();
+                    runDiagnostic();
+                });
+            }
+        };
+
+        const listColorObserver = new MutationObserver(scheduleListColorUpdate);
+        listColorObserver.observe(document.body, { childList: true, subtree: true });
+        this.cleanupMethods.push(() => {
+            listColorObserver.disconnect();
+            clearListColors();
+        });
+
+        // Apply once immediately (handles items already in DOM)
+        setTimeout(scheduleListColorUpdate, 500);
+
         // Also listen for keyboard events as backup (O(1) Set lookup)
         const keyHandler = (e) => {
             if (NAV_KEYS.has(e.key)) {
@@ -643,6 +780,11 @@ class Plugin extends AppPlugin {
             if (newSettings.isEnabled !== undefined) isEnabled = newSettings.isEnabled;
             if (newSettings.threadingMode !== undefined) threadingMode = newSettings.threadingMode;
             applySettings();
+            if (isEnabled) {
+                scheduleListColorUpdate();
+            } else {
+                clearListColors();
+            }
             if (statusBarItem && typeof statusBarItem.setTooltip === 'function') {
                 statusBarItem.setTooltip(`Indent Rainbow – ${colorSchemes[currentScheme]?.name ?? currentScheme}`);
             }
