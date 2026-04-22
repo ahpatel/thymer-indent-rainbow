@@ -316,7 +316,7 @@ body.ir-enabled .bt-caret {
     height: 18px;
     align-items: center;
     justify-content: center;
-    font-size: 11px;
+    font-size: 14px;           /* Tabler chevrons read better a bit bigger */
     line-height: 1;
     color: currentColor;
     opacity: 0;
@@ -328,18 +328,16 @@ body.ir-enabled .bt-caret {
 
 /* Reserve space for the caret on every row (visible or not) so bullets
    stay in a consistent column. Only show the glyph when bt-toggles AND
-   bt-has-children. */
+   bt-has-children. The glyph itself comes from Tabler Icons via the
+   .ti.ti-chevron-down / .ti-chevron-right classes we add in JS; Thymer
+   already loads the Tabler font so the ::before content is supplied by
+   Thymer's own stylesheet, keeping us visually in lock-step with the
+   native link-menu chevrons. */
 body.ir-enabled.bt-toggles .bt-marker > .bt-caret {
     display: inline-flex;
 }
 body.ir-enabled.bt-toggles .listitem.bt-has-children > .bt-marker > .bt-caret {
     opacity: 0.55;
-}
-body.ir-enabled.bt-toggles .listitem.bt-has-children > .bt-marker > .bt-caret::before {
-    content: "▾";
-}
-body.ir-enabled.bt-toggles .listitem.bt-has-children.bt-collapsed > .bt-marker > .bt-caret::before {
-    content: "▸";
 }
 body.ir-enabled.bt-toggles .listitem.bt-has-children > .bt-marker > .bt-caret:hover {
     opacity: 0.95;
@@ -945,7 +943,10 @@ body.ir-enabled.bt-toggles .item-drag-handle:hover::after {
             marker.setAttribute('contenteditable', 'false');
             marker.setAttribute('aria-hidden', 'true');
             const caret = document.createElement('span');
-            caret.className = 'bt-caret';
+            // `ti ti-chevron-down` gives us the same glyph Thymer's native
+            // link-menu collapse button uses. `updateCaretIcon` swaps to
+            // `ti-chevron-right` when the row is collapsed.
+            caret.className = 'bt-caret ti ti-chevron-down';
             caret.setAttribute('contenteditable', 'false');
             caret.setAttribute('aria-hidden', 'true');
             const bullet = document.createElement('span');
@@ -1073,17 +1074,41 @@ body.ir-enabled.bt-toggles .item-drag-handle:hover::after {
             return items;
         };
 
+        // Swap the Tabler Icons class on the caret so its glyph matches
+        // the row's collapse state (down = expanded, right = collapsed).
+        // Thymer's own stylesheet supplies the ::before content for these
+        // classes, keeping us visually identical to the native chevrons.
+        const updateCaretIcon = (li) => {
+            if (!li || !li.classList?.contains('listitem')) return;
+            const marker = li.firstElementChild;
+            if (!marker || !marker.classList?.contains('bt-marker')) return;
+            const caret = marker.firstElementChild;
+            if (!caret || !caret.classList?.contains('bt-caret')) return;
+            const collapsed = li.classList.contains('bt-collapsed');
+            const wantDown = !collapsed;
+            const hasDown = caret.classList.contains('ti-chevron-down');
+            const hasRight = caret.classList.contains('ti-chevron-right');
+            if (wantDown && !hasDown) {
+                caret.classList.remove('ti-chevron-right');
+                caret.classList.add('ti-chevron-down');
+            } else if (!wantDown && !hasRight) {
+                caret.classList.remove('ti-chevron-down');
+                caret.classList.add('ti-chevron-right');
+            }
+        };
+
         // Hide descendants of any .bt-collapsed row. Flat DOM model: walk
         // forward until we hit a row at the same-or-lower indent, hiding
         // everything in between.
         const applyCollapseState = (items) => {
             items = items || Array.from(document.querySelectorAll('.listitem'));
-            // First pass: clear any row we previously hid.
+            // First pass: clear any row we previously hid + resync caret icons.
             for (const li of items) {
                 if (li.dataset.btHiddenByCollapse === '1') {
                     li.style.display = '';
                     delete li.dataset.btHiddenByCollapse;
                 }
+                updateCaretIcon(li);
             }
             if (!isEnabled || !isTogglesEnabled) return;
             for (let i = 0; i < items.length; i++) {
