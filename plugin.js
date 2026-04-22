@@ -495,33 +495,33 @@ body.ir-enabled.bt-bullets .item-drag-handle:hover::after {
     opacity: 0.95;
 }
 
-/* Shift the drag-handle LEFT into the row's gutter for the two single-
-   feature states (caret-only or bullet-only). This keeps the ring on
-   top of Thymer's native hit zone and 20-30px left of the bt-caret,
-   matching the "popup on left, caret on right" layout the user
-   confirmed looks correct in caret-only mode. */
-body.ir-enabled.bt-toggles:not(.bt-bullets) .item-drag-handle,
-body.ir-enabled.bt-bullets:not(.bt-toggles) .item-drag-handle {
-    transform: translateX(-25px);
+/* Uniform 27px slots for every .link-menu component. Thymer's native
+   popup is 81pt wide with three components (zoom ↗, collapse/expand ∨,
+   drag-handle ○) — exactly 27pt per slot. By pinning each component
+   to 27px here, the popup naturally renders at 27 / 54 / 81pt based
+   on how many children are visible (collapse/expand/zoom get hidden
+   individually elsewhere, never the popup itself). This replaces the
+   previous transform-shift hacks that tried to reposition the drag-
+   handle visually — unnecessary once each slot has a predictable
+   width and the drag-handle is ordered first (see below). */
+body.ir-enabled .link-menu > .link-menu-action-zoom,
+body.ir-enabled .link-menu > .link-menu-action-collapse,
+body.ir-enabled .link-menu > .link-menu-action-expand,
+body.ir-enabled .link-menu > .item-drag-handle {
+    flex: 0 0 27px !important;
+    width: 27px !important;
+    min-width: 27px !important;
+    max-width: 27px !important;
+    box-sizing: border-box;
 }
 
-/* When BOTH features are on, let Thymer position the .link-menu popup
-   naturally. With collapse/expand/zoom all display:none'd above, the
-   popup shrinks to fit just the drag-handle, producing the same
-   "circle in a rounded rect, sitting left of the caret" visual as the
-   caret-only state minus the zoom arrow. An explicit transform here
-   tends to push the ring OUT of the popup's rounded-rect background
-   since the popup doesn't reflow to follow transformed children. */
-body.ir-enabled.bt-toggles.bt-bullets .item-drag-handle {
-    transform: none;
+/* Put the drag-handle first in the popup — matches the user-approved
+   layout (circle on the left, then collapse / zoom to its right).
+   Flex 'order: -1' only affects visual order, so native click handlers
+   bound to the actions still work unchanged. */
+body.ir-enabled .link-menu > .item-drag-handle {
+    order: -1;
 }
-
-/* NOTE: do NOT hide .link-menu wholesale — the .item-drag-handle is
-   a DESCENDANT of .link-menu (see its link-menu-opener class), so
-   hiding the container also hides the drag-handle. With every native
-   action inside (collapse, expand, zoom) individually display:none'd
-   above, the link-menu already collapses to near-zero visual width;
-   only the drag-handle and its shifted dots ring remain on hover. */
 `;
 
         // Write the palette for the current scheme as --ir-level-N root vars.
