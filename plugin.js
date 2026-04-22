@@ -433,12 +433,20 @@ body.ir-enabled .listitem.bt-zoom-start-line > .line-div {
     box-sizing: border-box;
 }
 
-/* ---------- Hide native hover-menu collapse/expand when our
-     caret is enabled, so there's only one collapse affordance.
-     Drag handle, options, and zoom in the native menu are untouched. ---------- */
+/* ---------- Hover-menu adjustments when our caret is active ----------
+     1. Hide the native collapse/expand chevrons (our .bt-caret is the
+        single collapse affordance).
+     2. Force-show the native options (dots) button, which Thymer hides
+        per-row with an inline display:none; our !important wins since
+        Thymer's inline style has no !important. It naturally sits in
+        DOM position 1 of .link-menu, so after collapse/expand are
+        hidden it fills the slot where collapse used to be. ---------- */
 body.ir-enabled.bt-toggles .link-menu .link-menu-action-collapse,
 body.ir-enabled.bt-toggles .link-menu .link-menu-action-expand {
     display: none !important;
+}
+body.ir-enabled.bt-toggles .link-menu .link-menu-action-options {
+    display: inline-flex !important;
 }
 `;
 
