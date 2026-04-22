@@ -522,12 +522,27 @@ body.ir-enabled .link-menu > .item-drag-handle {
     box-sizing: border-box;
 }
 
-/* Put the drag-handle first in the popup — matches the user-approved
-   layout (circle on the left, then collapse / zoom to its right).
-   Flex 'order: -1' only affects visual order, so native click handlers
-   bound to the actions still work unchanged. */
+/* Square up the drag-handle so its native dotted border wraps a 27x27
+   circle that fills the slot. Previously the width override made the
+   slot 27px wide while the native height was smaller, producing an
+   oval whose hit-zone (full 27px slot) did not visually match the
+   narrower dotted ring — so hovering the empty slot edge was firing
+   the drag/options menu while hovering the visible ring looked inert.
+   Matching width to height ties the hit-zone to what the user sees. */
 body.ir-enabled .link-menu > .item-drag-handle {
-    order: -1;
+    height: 27px !important;
+    order: -1;  /* circle always on the left of the popup */
+}
+
+/* When BOTH outline features are on, hide the row's .bt-caret — the
+   popup now carries a toggle-caret in its right slot, and keeping
+   both produces a redundant double-chevron (one fixed in the row,
+   one inside the hover popup). Bullet-only and caret-only states
+   keep .bt-caret in the row since the popup either lacks a toggle
+   affordance (bullet-only) or uses zoom in the right slot (caret-
+   only). */
+body.ir-enabled.bt-toggles.bt-bullets .bt-caret {
+    display: none !important;
 }
 `;
 
