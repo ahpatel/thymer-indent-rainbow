@@ -1775,6 +1775,48 @@ body.ir-enabled.bt-toggles.bt-bullets .item-drag-handle {
             outlineTarget.removeEventListener('click', outlineClickHandler, true);
         });
 
+        // Cursor-placement guard. Because our .bt-marker is injected as the
+        // first child of every .listitem, clicking an empty row (or any
+        // navigation that lands at listitem offset 0) puts the caret BEFORE
+        // the marker — visually at the row's left edge, left of the bullet.
+        // That's confusing on empty rows where the user expects to start
+        // typing right after the bullet. If we detect that placement, move
+        // the caret into the next sibling (the native line-div / text
+        // container) so typing begins inside the text area. No-ops on rows
+        // without our marker, so disabling both outline features leaves
+        // native behaviour alone.
+        let selectionFixBusy = false;
+        const fixCursorBeforeMarker = () => {
+            if (selectionFixBusy) return;
+            if (!isEnabled || (!isTogglesEnabled && !isBulletsEnabled)) return;
+            const sel = window.getSelection && window.getSelection();
+            if (!sel || !sel.rangeCount) return;
+            const range = sel.getRangeAt(0);
+            if (!range.collapsed) return;
+            const node = range.startContainer;
+            if (!node || node.nodeType !== 1) return;
+            if (range.startOffset !== 0) return;
+            if (!node.classList || !node.classList.contains('listitem')) return;
+            const marker = node.firstElementChild;
+            if (!marker || !marker.classList.contains('bt-marker')) return;
+            const target = marker.nextElementSibling;
+            if (!target) return;
+            selectionFixBusy = true;
+            try {
+                const newRange = document.createRange();
+                newRange.selectNodeContents(target);
+                newRange.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(newRange);
+            } finally {
+                selectionFixBusy = false;
+            }
+        };
+        document.addEventListener('selectionchange', fixCursorBeforeMarker);
+        this.cleanupMethods.push(() => {
+            document.removeEventListener('selectionchange', fixCursorBeforeMarker);
+        });
+
         // Line-item created hook: when a new line is created while zoomed
         // and it's not under the zoom subtree, move it under the zoom root
         // so Enter-to-create works correctly inside a zoom.
