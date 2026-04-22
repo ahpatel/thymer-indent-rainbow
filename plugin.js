@@ -970,6 +970,44 @@ body.ir-enabled.bt-toggles.bt-bullets .item-drag-handle {
         // our own observer callback infinitely.
         let outlineMutating = false;
 
+        // If the caret currently sits at listitem offset 0 (i.e. BEFORE our
+        // injected marker), forward it to the start of the next sibling so
+        // typing begins inside the text area rather than to the left of the
+        // bullet. Called from two places:
+        //   - selectionchange listener (covers clicks / arrow navigation)
+        //   - injectMarker right after insertBefore (covers the Enter-
+        //     to-create-new-row case, where the caret is placed BEFORE the
+        //     marker DOM-wise via a pure mutation that doesn't re-fire
+        //     selectionchange)
+        let cursorForwardBusy = false;
+        const forwardCursorPastMarker = (li) => {
+            if (cursorForwardBusy) return;
+            const sel = window.getSelection && window.getSelection();
+            if (!sel || !sel.rangeCount) return;
+            const range = sel.getRangeAt(0);
+            if (!range.collapsed) return;
+            if (range.startOffset !== 0) return;
+            const node = range.startContainer;
+            if (!node || node.nodeType !== 1) return;
+            // If a specific li was passed, only act when that's the container.
+            if (li && node !== li) return;
+            if (!node.classList || !node.classList.contains('listitem')) return;
+            const marker = node.firstElementChild;
+            if (!marker || !marker.classList.contains('bt-marker')) return;
+            const target = marker.nextElementSibling;
+            if (!target) return;
+            cursorForwardBusy = true;
+            try {
+                const newRange = document.createRange();
+                newRange.selectNodeContents(target);
+                newRange.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(newRange);
+            } finally {
+                cursorForwardBusy = false;
+            }
+        };
+
         // Inject (or re-sync) the .bt-marker wrapper as the first child of
         // a .listitem. Transfers the marginLeft off whichever native child
         // currently holds it onto .bt-marker so indentation flow is
@@ -1022,6 +1060,10 @@ body.ir-enabled.bt-toggles.bt-bullets .item-drag-handle {
             outlineMutating = true;
             li.insertBefore(marker, li.firstElementChild);
             outlineMutating = false;
+            // The caret may have been sitting at listitem offset 0 just
+            // before the insert (newly-created empty row case). After the
+            // insert, offset 0 now points before our marker. Forward it.
+            forwardCursorPastMarker(li);
         };
 
         // Remove our marker and restore the marginLeft to the native child
@@ -1775,46 +1817,17 @@ body.ir-enabled.bt-toggles.bt-bullets .item-drag-handle {
             outlineTarget.removeEventListener('click', outlineClickHandler, true);
         });
 
-        // Cursor-placement guard. Because our .bt-marker is injected as the
-        // first child of every .listitem, clicking an empty row (or any
-        // navigation that lands at listitem offset 0) puts the caret BEFORE
-        // the marker — visually at the row's left edge, left of the bullet.
-        // That's confusing on empty rows where the user expects to start
-        // typing right after the bullet. If we detect that placement, move
-        // the caret into the next sibling (the native line-div / text
-        // container) so typing begins inside the text area. No-ops on rows
-        // without our marker, so disabling both outline features leaves
-        // native behaviour alone.
-        let selectionFixBusy = false;
-        const fixCursorBeforeMarker = () => {
-            if (selectionFixBusy) return;
+        // Cursor-placement guard. See forwardCursorPastMarker above — this
+        // listener covers the click / arrow-navigation path. The new-row
+        // path is handled inline in injectMarker. Single shared helper so
+        // behaviour stays consistent across both entry points.
+        const onSelectionChange = () => {
             if (!isEnabled || (!isTogglesEnabled && !isBulletsEnabled)) return;
-            const sel = window.getSelection && window.getSelection();
-            if (!sel || !sel.rangeCount) return;
-            const range = sel.getRangeAt(0);
-            if (!range.collapsed) return;
-            const node = range.startContainer;
-            if (!node || node.nodeType !== 1) return;
-            if (range.startOffset !== 0) return;
-            if (!node.classList || !node.classList.contains('listitem')) return;
-            const marker = node.firstElementChild;
-            if (!marker || !marker.classList.contains('bt-marker')) return;
-            const target = marker.nextElementSibling;
-            if (!target) return;
-            selectionFixBusy = true;
-            try {
-                const newRange = document.createRange();
-                newRange.selectNodeContents(target);
-                newRange.collapse(true);
-                sel.removeAllRanges();
-                sel.addRange(newRange);
-            } finally {
-                selectionFixBusy = false;
-            }
+            forwardCursorPastMarker();
         };
-        document.addEventListener('selectionchange', fixCursorBeforeMarker);
+        document.addEventListener('selectionchange', onSelectionChange);
         this.cleanupMethods.push(() => {
-            document.removeEventListener('selectionchange', fixCursorBeforeMarker);
+            document.removeEventListener('selectionchange', onSelectionChange);
         });
 
         // Line-item created hook: when a new line is created while zoomed
