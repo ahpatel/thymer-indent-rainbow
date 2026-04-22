@@ -432,6 +432,14 @@ body.ir-enabled .listitem.bt-zoom-start-line > .line-div {
     padding-left: 4px;
     box-sizing: border-box;
 }
+
+/* ---------- Hide native hover-menu collapse/expand when our
+     caret is enabled, so there's only one collapse affordance.
+     Drag handle, options, and zoom in the native menu are untouched. ---------- */
+body.ir-enabled.bt-toggles .link-menu .link-menu-action-collapse,
+body.ir-enabled.bt-toggles .link-menu .link-menu-action-expand {
+    display: none !important;
+}
 `;
 
         // Write the palette for the current scheme as --ir-level-N root vars.
