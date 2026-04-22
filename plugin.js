@@ -332,7 +332,7 @@ body.ir-enabled .bt-caret {
        rainbow indent guide that sits at the row's margin-left. Uses
        transform (not margin) so sibling layout (.bt-bullet column) is
        unaffected. */
-    transform: translateX(1px);
+    transform: translateX(-.25px);
 }
 
 /* Reserve space for the caret on every row (visible or not) so bullets
@@ -510,19 +510,15 @@ body.ir-enabled.bt-bullets:not(.bt-toggles) .item-drag-handle {
     transform: translateX(20px);
 }
 body.ir-enabled.bt-toggles.bt-bullets .item-drag-handle {
-    transform: translateX(40px);
+    transform: translateX(20px);
 }
 
-/* When both outline features are on, every action inside .link-menu
-   is hidden (collapse/expand by .bt-toggles, zoom by .bt-bullets), so
-   the floating popup would appear empty. Hide it entirely to keep the
-   hover surface clean — only the drag-handle (with its dots ring)
-   remains visible on hover, which is exactly the affordance the user
-   asked for. If either feature is off, the relevant native action
-   comes back and .link-menu keeps displaying. */
-body.ir-enabled.bt-toggles.bt-bullets .link-menu {
-    display: none !important;
-}
+/* NOTE: do NOT hide .link-menu wholesale — the .item-drag-handle is
+   a DESCENDANT of .link-menu (see its link-menu-opener class), so
+   hiding the container also hides the drag-handle. With every native
+   action inside (collapse, expand, zoom) individually display:none'd
+   above, the link-menu already collapses to near-zero visual width;
+   only the drag-handle and its shifted dots ring remain on hover. */
 `;
 
         // Write the palette for the current scheme as --ir-level-N root vars.
