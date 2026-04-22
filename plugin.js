@@ -27,6 +27,8 @@ class Plugin extends AppPlugin {
         const OPACITY_KEY = 'indent-rainbow-opacity';
         const ENABLED_KEY = 'indent-rainbow-enabled';
         const THREADING_MODE_KEY = 'indent-rainbow-threading-mode';
+        const BULLETS_ENABLED_KEY = 'indent-rainbow-bullets-enabled';
+        const TOGGLES_ENABLED_KEY = 'indent-rainbow-toggles-enabled';
 
         // Color schemes for different tastes
         const colorSchemes = {
@@ -150,6 +152,8 @@ class Plugin extends AppPlugin {
         let currentOpacity = parseFloat(localStorage.getItem(OPACITY_KEY)) || 0.3;
         let isEnabled = localStorage.getItem(ENABLED_KEY) !== 'false'; // default true
         let threadingMode = localStorage.getItem(THREADING_MODE_KEY) || 'staircase'; // 'staircase' or 'stretched'
+        let isBulletsEnabled = localStorage.getItem(BULLETS_ENABLED_KEY) !== 'false'; // default true
+        let isTogglesEnabled = localStorage.getItem(TOGGLES_ENABLED_KEY) !== 'false'; // default true
 
         // Opacity presets
         const opacityPresets = {
@@ -272,6 +276,162 @@ body.ir-enabled.dark .listitem-indentline,
 body.ir-enabled [data-theme="dark"] .listitem-indentline {
     filter: brightness(1.1);
 }
+
+/* =====================================================
+   Workflowy-style outline: bullets + disclosure carets
+   (gated by body.bt-bullets and body.bt-toggles)
+   ===================================================== */
+
+/* .bt-marker is an inline-flex wrapper injected as the first child of
+   each .listitem. It holds .bt-caret + .bt-bullet. The wrapper spans the
+   parent's full line-box height (1lh, with fallback) so flex centering
+   puts each child on the text's vertical midline — regardless of
+   heading/body font size. */
+body.ir-enabled .bt-marker {
+    display: none;
+    box-sizing: border-box;
+    height: 1.6em;           /* fallback for engines without 1lh */
+    height: 1lh;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 2px;
+    vertical-align: top;
+    user-select: none;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 2;
+}
+
+/* Show the marker wrapper whenever either feature is enabled. */
+body.ir-enabled.bt-bullets .bt-marker,
+body.ir-enabled.bt-toggles .bt-marker {
+    display: inline-flex;
+}
+
+/* ---------- Caret (disclosure chevron) ---------- */
+
+body.ir-enabled .bt-caret {
+    display: none;
+    width: 18px;
+    height: 18px;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    line-height: 1;
+    color: currentColor;
+    opacity: 0;
+    cursor: pointer;
+    transition: opacity 0.12s ease, transform 0.12s ease;
+    flex-shrink: 0;
+    transform-origin: center;
+}
+
+/* Reserve space for the caret on every row (visible or not) so bullets
+   stay in a consistent column. Only show the glyph when bt-toggles AND
+   bt-has-children. */
+body.ir-enabled.bt-toggles .bt-marker > .bt-caret {
+    display: inline-flex;
+}
+body.ir-enabled.bt-toggles .listitem.bt-has-children > .bt-marker > .bt-caret {
+    opacity: 0.55;
+}
+body.ir-enabled.bt-toggles .listitem.bt-has-children > .bt-marker > .bt-caret::before {
+    content: "▾";
+}
+body.ir-enabled.bt-toggles .listitem.bt-has-children.bt-collapsed > .bt-marker > .bt-caret::before {
+    content: "▸";
+}
+body.ir-enabled.bt-toggles .listitem.bt-has-children > .bt-marker > .bt-caret:hover {
+    opacity: 0.95;
+}
+
+/* ---------- Bullet (clickable dot) ---------- */
+
+body.ir-enabled .bt-bullet {
+    display: none;
+    width: 16px;
+    height: 16px;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    position: relative;
+}
+
+body.ir-enabled.bt-bullets .bt-marker > .bt-bullet {
+    display: inline-flex;
+}
+
+body.ir-enabled .bt-bullet::after {
+    content: '';
+    display: block;
+    box-sizing: border-box;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    border: 1px solid rgba(128, 128, 128, 0.55);
+    background: currentColor;
+    background-clip: padding-box;
+    opacity: 0.45;
+    transition: opacity 0.15s ease, transform 0.15s ease,
+                box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+body.ir-enabled .bt-bullet:hover::after {
+    opacity: 0.95;
+    border-color: rgba(128, 128, 128, 0.85);
+    transform: scale(1.35);
+    box-shadow: 0 0 0 3px rgba(128, 128, 128, 0.18);
+}
+
+body.ir-enabled .bt-bullet:active::after {
+    transform: scale(1.1);
+}
+
+/* Parent rows get a hollow bullet (ring) when carets are NOT shown, so the
+   user can still visually tell the row has children. When carets ARE shown
+   (bt-toggles), keep the solid bullet since the caret carries the signal. */
+body.ir-enabled.bt-bullets:not(.bt-toggles) .listitem.bt-has-children > .bt-marker > .bt-bullet::after {
+    background: transparent;
+    border: 1.5px solid rgba(128, 128, 128, 0.65);
+    opacity: 0.75;
+}
+
+@media (prefers-color-scheme: dark) {
+    body.ir-enabled .bt-bullet::after {
+        border-color: rgba(180, 180, 180, 0.45);
+    }
+    body.ir-enabled .bt-bullet:hover::after {
+        border-color: rgba(200, 200, 200, 0.75);
+    }
+}
+
+body.ir-enabled.dark .bt-bullet::after,
+body.ir-enabled [data-theme="dark"] .bt-bullet::after {
+    border-color: rgba(180, 180, 180, 0.45);
+}
+
+/* ---------- Native marker interaction ---------- */
+
+/* When PR bullets are on, hide Thymer's native ulist bullet so our PR bullet
+   is the sole marker for ulist rows. Native olist numbers and task checkboxes
+   stay visible as siblings to the RIGHT of .bt-marker (left of text). */
+body.ir-enabled.bt-bullets .listitem-ulist > .line-bullet-div {
+    display: none !important;
+}
+
+/* ---------- Collapse hiding ---------- */
+
+body.ir-enabled.bt-toggles .listitem.bt-collapsed > .listitem,
+body.ir-enabled.bt-toggles .listitem.bt-collapsed .listitem {
+    display: none !important;
+}
+
+/* ---------- Zoom start line (visual subtle style) ---------- */
+body.ir-enabled .listitem.bt-zoom-start-line > .line-div {
+    padding-left: 4px;
+    box-sizing: border-box;
+}
 `;
 
         // Write the palette for the current scheme as --ir-level-N root vars.
@@ -298,11 +458,15 @@ body.ir-enabled [data-theme="dark"] .listitem-indentline {
             localStorage.setItem(OPACITY_KEY, currentOpacity);
             localStorage.setItem(ENABLED_KEY, isEnabled);
             localStorage.setItem(THREADING_MODE_KEY, threadingMode);
+            localStorage.setItem(BULLETS_ENABLED_KEY, isBulletsEnabled);
+            localStorage.setItem(TOGGLES_ENABLED_KEY, isTogglesEnabled);
         };
 
         // Toggle the ir-enabled body class which gates all our CSS rules.
         const applyEnabledState = () => {
             document.body.classList.toggle('ir-enabled', isEnabled);
+            document.body.classList.toggle('bt-bullets', isEnabled && isBulletsEnabled);
+            document.body.classList.toggle('bt-toggles', isEnabled && isTogglesEnabled);
         };
 
         // Inject the static stylesheet once.
@@ -675,6 +839,875 @@ body.ir-enabled [data-theme="dark"] .listitem-indentline {
 
         scheduleListColorUpdate(null);
 
+        // =====================================================
+        // Workflowy-style outline: bullets + disclosure carets
+        //   (1) .bt-marker wrapper injected as first child of every .listitem
+        //   (2) Disclosure carets on parents (bt-has-children)
+        //   (3) Collapse via .bt-collapsed (CSS hides descendants)
+        //   (4) Bullet click → zoom; caret click → toggle collapse
+        // =====================================================
+
+        const EDITOR_SELECTORS = '.editor-wrapper, .page-content, #editor';
+        const INDENT_CARRIER_SELECTOR = '.line-check-div, .line-bullet-div, .line-number-div, .line-div';
+
+        // Scan ALL direct children of a .listitem for the first one with
+        // inline style.marginLeft. Thymer parks indent on whichever leftmost
+        // marker container a row has (check-div / bullet-div / number-div /
+        // line-div), so we must not enumerate specific classes — that's the
+        // bug pr-1 had for nested olists.
+        const getItemIndent = (li) => {
+            if (!li) return 0;
+            // After marker injection, .bt-marker holds the indent (transferred).
+            const marker = li.firstElementChild;
+            if (marker && marker.classList?.contains('bt-marker') && marker.style.marginLeft) {
+                return parseInt(marker.style.marginLeft) || 0;
+            }
+            for (let i = 0; i < li.children.length; i++) {
+                const c = li.children[i];
+                if (c.classList?.contains('bt-marker')) continue;
+                if (c.style && c.style.marginLeft) {
+                    const v = parseInt(c.style.marginLeft) || 0;
+                    if (v) return v;
+                }
+            }
+            if (li.style && li.style.marginLeft) {
+                return parseInt(li.style.marginLeft) || 0;
+            }
+            return 0;
+        };
+
+        // Guard flag so mutations WE make while injecting don't re-trigger
+        // our own observer callback infinitely.
+        let outlineMutating = false;
+
+        // Inject (or re-sync) the .bt-marker wrapper as the first child of
+        // a .listitem. Transfers the marginLeft off whichever native child
+        // currently holds it onto .bt-marker so indentation flow is
+        // preserved without absolute positioning.
+        const injectMarker = (li) => {
+            if (!li || !li.classList || !li.classList.contains('listitem')) return;
+            let marker = li.firstElementChild;
+            if (marker && marker.classList.contains('bt-marker')) {
+                // Marker already present — re-sync indent in case Thymer
+                // moved marginLeft back to a native child.
+                for (let i = 1; i < li.children.length; i++) {
+                    const c = li.children[i];
+                    if (c.style && c.style.marginLeft) {
+                        marker.style.marginLeft = c.style.marginLeft;
+                        marker.dataset.btFromClass = c.className || '';
+                        c.style.marginLeft = '';
+                        break;
+                    }
+                }
+                return;
+            }
+            marker = document.createElement('span');
+            marker.className = 'bt-marker';
+            marker.setAttribute('contenteditable', 'false');
+            marker.setAttribute('aria-hidden', 'true');
+            const caret = document.createElement('span');
+            caret.className = 'bt-caret';
+            caret.setAttribute('contenteditable', 'false');
+            caret.setAttribute('aria-hidden', 'true');
+            const bullet = document.createElement('span');
+            bullet.className = 'bt-bullet';
+            bullet.setAttribute('contenteditable', 'false');
+            bullet.setAttribute('aria-hidden', 'true');
+            marker.appendChild(caret);
+            marker.appendChild(bullet);
+
+            // Transfer marginLeft from the first indent-carrying native child.
+            for (let i = 0; i < li.children.length; i++) {
+                const c = li.children[i];
+                if (c.style && c.style.marginLeft) {
+                    marker.style.marginLeft = c.style.marginLeft;
+                    marker.dataset.btFromClass = c.className || '';
+                    c.style.marginLeft = '';
+                    break;
+                }
+            }
+            outlineMutating = true;
+            li.insertBefore(marker, li.firstElementChild);
+            outlineMutating = false;
+        };
+
+        // Remove our marker and restore the marginLeft to the native child
+        // whose class we remembered when we transferred from it.
+        const removeMarker = (li) => {
+            if (!li) return;
+            const marker = li.firstElementChild;
+            if (!marker || !marker.classList?.contains('bt-marker')) return;
+            const restoredTo = marker.dataset.btFromClass;
+            const ml = marker.style.marginLeft;
+            outlineMutating = true;
+            if (ml && restoredTo) {
+                // Restore to the first matching-class child if it's still there.
+                for (let i = 1; i < li.children.length; i++) {
+                    const c = li.children[i];
+                    if (c.className === restoredTo) {
+                        c.style.marginLeft = ml;
+                        break;
+                    }
+                }
+            }
+            marker.remove();
+            outlineMutating = false;
+        };
+
+        // Synchronously classify a parent row as has-children / not, given
+        // the presence of a deeper-indented next sibling in document order.
+        const updateHasChildrenFor = (li) => {
+            if (!li || !li.classList?.contains('listitem')) return;
+            const myIndent = getItemIndent(li);
+            // Look ahead in document order (flat-DOM model) for the next
+            // .listitem; if it's indented deeper, this row has children.
+            let walker = li;
+            let hasChild = false;
+            while (walker) {
+                const next = walker.nextElementSibling
+                    || (walker.parentElement && walker.parentElement !== document.body
+                        ? walker.parentElement.nextElementSibling : null);
+                if (!next) break;
+                if (next.classList && next.classList.contains('listitem')) {
+                    const nextIndent = getItemIndent(next);
+                    hasChild = nextIndent > myIndent;
+                    break;
+                }
+                // Skip non-listitem siblings (e.g., editor chrome).
+                walker = next;
+                if (walker.querySelector) {
+                    const firstLi = walker.querySelector('.listitem');
+                    if (firstLi) {
+                        const nextIndent = getItemIndent(firstLi);
+                        hasChild = nextIndent > myIndent;
+                        break;
+                    }
+                }
+            }
+            if (hasChild) li.classList.add('bt-has-children');
+            else li.classList.remove('bt-has-children');
+        };
+
+        // Find the `.listitem` that is the logical parent of `li` by walking
+        // backwards in the flat DOM order until we find a `.listitem` with
+        // strictly smaller indent. Used for the sync has-children path.
+        const findParentListItem = (li) => {
+            if (!li) return null;
+            const myIndent = getItemIndent(li);
+            if (myIndent === 0) return null;
+            const all = document.querySelectorAll('.listitem');
+            let found = null;
+            for (let i = 0; i < all.length; i++) {
+                if (all[i] === li) {
+                    for (let j = i - 1; j >= 0; j--) {
+                        const prev = all[j];
+                        if (getItemIndent(prev) < myIndent) { found = prev; break; }
+                    }
+                    break;
+                }
+            }
+            return found;
+        };
+
+        // Full-document annotation pass (RAF-debounced). Injects markers on
+        // any rows missing one and recomputes bt-has-children for every row.
+        const annotateAll = () => {
+            const items = Array.from(document.querySelectorAll('.listitem'));
+            if (!isEnabled || (!isBulletsEnabled && !isTogglesEnabled)) {
+                // Strip everything if disabled.
+                for (const li of items) {
+                    removeMarker(li);
+                    li.classList.remove('bt-has-children', 'bt-collapsed', 'bt-zoom-start-line');
+                    if (li.style.display === 'none') li.style.display = '';
+                }
+                return items;
+            }
+            for (const li of items) injectMarker(li);
+            // Flat-pass has-children: compare each row's indent to next row's.
+            for (let i = 0; i < items.length; i++) {
+                const cur = items[i];
+                const next = items[i + 1];
+                const hasChild = next && getItemIndent(next) > getItemIndent(cur);
+                if (hasChild) cur.classList.add('bt-has-children');
+                else cur.classList.remove('bt-has-children');
+            }
+            return items;
+        };
+
+        // Hide descendants of any .bt-collapsed row. Flat DOM model: walk
+        // forward until we hit a row at the same-or-lower indent, hiding
+        // everything in between.
+        const applyCollapseState = (items) => {
+            items = items || Array.from(document.querySelectorAll('.listitem'));
+            // First pass: clear any row we previously hid.
+            for (const li of items) {
+                if (li.dataset.btHiddenByCollapse === '1') {
+                    li.style.display = '';
+                    delete li.dataset.btHiddenByCollapse;
+                }
+            }
+            if (!isEnabled || !isTogglesEnabled) return;
+            for (let i = 0; i < items.length; i++) {
+                const cur = items[i];
+                if (!cur.classList.contains('bt-collapsed')) continue;
+                const baseIndent = getItemIndent(cur);
+                for (let j = i + 1; j < items.length; j++) {
+                    const next = items[j];
+                    if (getItemIndent(next) <= baseIndent) break;
+                    if (next.style.display !== 'none') {
+                        next.style.display = 'none';
+                        next.dataset.btHiddenByCollapse = '1';
+                    }
+                }
+            }
+        };
+
+        let outlineRafPending = false;
+        const runOutlinePass = () => {
+            outlineRafPending = false;
+            const items = annotateAll();
+            applyCollapseState(items);
+        };
+        const scheduleOutlinePass = () => {
+            if (outlineRafPending) return;
+            outlineRafPending = true;
+            requestAnimationFrame(runOutlinePass);
+        };
+
+        // ---------- Synchronous observer path (native-feel) ----------
+        // MutationObserver callbacks run as microtasks BEFORE the next paint.
+        // For added .listitem nodes we do the marker injection + an
+        // immediate bt-has-children toggle on the parent synchronously, so
+        // the new row and its parent caret show up in the same frame.
+        const SYNC_INJECT_CAP = 24; // fall back to RAF above this many
+        let zoomStartLineGuid = null;
+
+        const applyZoomStartLineStyle = (zoomGuid) => {
+            document.querySelectorAll('.listitem.bt-zoom-start-line').forEach(li => {
+                li.classList.remove('bt-zoom-start-line');
+            });
+            zoomStartLineGuid = zoomGuid || null;
+            if (!zoomGuid) return;
+            const li = document.querySelector(`.listitem[data-guid="${CSS.escape(zoomGuid)}"]`);
+            if (li) li.classList.add('bt-zoom-start-line');
+        };
+
+        const outlineObserver = new MutationObserver((mutations) => {
+            if (outlineMutating) return;
+            if (!isEnabled || (!isBulletsEnabled && !isTogglesEnabled)) return;
+
+            const addedListItems = [];
+            let sawStructuralChange = false;
+            let sawIndentChange = false;
+
+            for (const m of mutations) {
+                if (m.type === 'childList') {
+                    // Ignore additions to/from our own marker subtree.
+                    if (m.target && m.target.classList?.contains('bt-marker')) continue;
+                    for (const n of m.addedNodes) {
+                        if (n.nodeType !== 1) continue;
+                        if (n.classList?.contains('bt-marker')) continue;
+                        if (n.classList?.contains('listitem')) {
+                            addedListItems.push(n);
+                            sawStructuralChange = true;
+                        } else if (n.querySelectorAll) {
+                            const kids = n.querySelectorAll('.listitem');
+                            if (kids.length) {
+                                kids.forEach(k => addedListItems.push(k));
+                                sawStructuralChange = true;
+                            }
+                        }
+                    }
+                    if (!sawStructuralChange) {
+                        for (const n of m.removedNodes) {
+                            if (n.nodeType !== 1) continue;
+                            if (n.classList?.contains('listitem')
+                                || (n.querySelector && n.querySelector('.listitem'))) {
+                                sawStructuralChange = true;
+                                break;
+                            }
+                        }
+                    }
+                } else if (m.type === 'attributes' && m.attributeName === 'style') {
+                    const t = m.target;
+                    if (!t || !t.classList) continue;
+                    if (t.classList.contains('bt-marker')) continue;
+                    if (t.id === 'virtualinput-wrapper') continue;
+                    if (t.classList.contains('line-check-div')
+                        || t.classList.contains('line-bullet-div')
+                        || t.classList.contains('line-number-div')
+                        || t.classList.contains('line-div')) {
+                        sawIndentChange = true;
+                    }
+                }
+            }
+
+            // Synchronous path: inject markers + toggle parent has-children
+            // for a small number of added rows — typical Enter keystroke.
+            if (addedListItems.length > 0 && addedListItems.length <= SYNC_INJECT_CAP) {
+                outlineMutating = true;
+                try {
+                    for (const li of addedListItems) injectMarker(li);
+                    for (const li of addedListItems) {
+                        const parent = findParentListItem(li);
+                        if (parent) updateHasChildrenFor(parent);
+                        // Newly-added rows start with no children of their own.
+                        li.classList.remove('bt-has-children');
+                    }
+                } finally {
+                    outlineMutating = false;
+                }
+            } else if (addedListItems.length > SYNC_INJECT_CAP) {
+                sawStructuralChange = true;
+            }
+
+            // Indent-change or large-batch → RAF-debounced full pass.
+            if (sawStructuralChange || sawIndentChange) {
+                scheduleOutlinePass();
+            }
+            // Also reapply zoom-start-line if it was in the added batch.
+            if (zoomStartLineGuid) {
+                const still = document.querySelector(`.listitem[data-guid="${CSS.escape(zoomStartLineGuid)}"]`);
+                if (still && !still.classList.contains('bt-zoom-start-line')) {
+                    still.classList.add('bt-zoom-start-line');
+                }
+            }
+        });
+
+        const outlineTarget = document.querySelector(EDITOR_SELECTORS) || document.body;
+        outlineObserver.observe(outlineTarget, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['style']
+        });
+
+        // Initial batch pass at load.
+        scheduleOutlinePass();
+        setTimeout(scheduleOutlinePass, 250);
+        setTimeout(scheduleOutlinePass, 1000);
+
+        this.cleanupMethods.push(() => outlineObserver.disconnect());
+        this.cleanupMethods.push(() => {
+            // Strip all injected markers and outline classes on unload.
+            document.querySelectorAll('.listitem').forEach(li => {
+                removeMarker(li);
+                li.classList.remove('bt-has-children', 'bt-collapsed', 'bt-zoom-start-line');
+                if (li.dataset.btHiddenByCollapse === '1') {
+                    li.style.display = '';
+                    delete li.dataset.btHiddenByCollapse;
+                }
+            });
+            document.body.classList.remove('bt-bullets', 'bt-toggles');
+        });
+
+        // ---------- GUID resolution + zoom ----------
+        // Resolve the GUID of a .listitem. Try data-guid attrs first, then
+        // fall back to index-in-flattened-record-tree.
+        const resolveLineItemGuid = async (li) => {
+            if (!li) return null;
+            const attrCandidates = [
+                'data-guid', 'data-lineitem-guid', 'data-line-item-guid',
+                'data-item-guid', 'data-id', 'id'
+            ];
+            for (const attr of attrCandidates) {
+                const val = li.getAttribute(attr);
+                if (val && val.length >= 12) return val;
+            }
+            try {
+                const panel = this.ui.getActivePanel && this.ui.getActivePanel();
+                const record = panel && panel.getActiveRecord
+                    ? panel.getActiveRecord() : null;
+                if (!record || typeof record.getLineItems !== 'function') return null;
+                const rootItems = await record.getLineItems();
+                if (!rootItems || rootItems.length === 0) return null;
+                const flatten = (arr) => {
+                    const out = [];
+                    for (const it of arr) {
+                        out.push(it);
+                        const ch = it.children;
+                        if (ch && ch.length) out.push(...flatten(ch));
+                    }
+                    return out;
+                };
+                const flat = flatten(rootItems);
+                const allDomItems = Array.from(document.querySelectorAll('.listitem'));
+                const idx = allDomItems.indexOf(li);
+                if (idx >= 0 && idx < flat.length && typeof flat[idx].getGuid === 'function') {
+                    return flat[idx].getGuid();
+                }
+            } catch (err) {
+                console.warn('[indent-rainbow] GUID resolution failed:', err);
+            }
+            return null;
+        };
+
+        const waitMs = (ms) => new Promise(r => setTimeout(r, ms));
+        const lineItemGuid = (it) => (it && typeof it.getGuid === 'function' ? it.getGuid() : it?.guid);
+
+        const findLineItemByGuid = (items, g) => {
+            if (!items || !g) return null;
+            for (const it of items) {
+                if (lineItemGuid(it) === g) return it;
+                const ch = it.children;
+                if (ch && ch.length) {
+                    const found = findLineItemByGuid(ch, g);
+                    if (found) return found;
+                }
+            }
+            return null;
+        };
+
+        const findLineItemByGuidAsync = async (items, g) => {
+            if (!items || !g) return null;
+            const direct = findLineItemByGuid(items, g);
+            if (direct) return direct;
+            for (const it of items) {
+                let ch = it.children;
+                if (ch == null && typeof it.getChildren === 'function') {
+                    try { ch = await it.getChildren(); } catch { ch = null; }
+                }
+                if (ch && ch.length) {
+                    const found = await findLineItemByGuidAsync(ch, g);
+                    if (found) return found;
+                }
+            }
+            return null;
+        };
+
+        const syncLineZoomContext = () => {
+            const panel = this.ui.getActivePanel && this.ui.getActivePanel();
+            if (!panel || typeof panel.getNavigation !== 'function') {
+                this.lineZoomRootGuid = null;
+                return;
+            }
+            const nav = panel.getNavigation() || {};
+            const record = panel.getActiveRecord && panel.getActiveRecord();
+            const rg = record && typeof record.getGuid === 'function' ? record.getGuid() : null;
+            const rid = nav.rootId || null;
+            if (!rid || !rg) { this.lineZoomRootGuid = null; return; }
+            this.lineZoomRootGuid = (rid !== rg) ? rid : null;
+        };
+
+        const isLineUnderZoomSubtree = async (record, lineGuid, zoomGuid) => {
+            if (!record || !lineGuid || !zoomGuid) return false;
+            if (lineGuid === zoomGuid) return true;
+            let roots;
+            try { roots = await record.getLineItems(); } catch { return false; }
+            let cur = await findLineItemByGuidAsync(roots, lineGuid);
+            if (!cur) return false;
+            for (let depth = 0; depth < 500; depth++) {
+                const g = lineItemGuid(cur);
+                if (g === zoomGuid) return true;
+                if (typeof cur.getParent !== 'function') return false;
+                const p = await cur.getParent();
+                if (!p) return false;
+                if (typeof p.getLineItems === 'function') return false;
+                cur = p;
+            }
+            return false;
+        };
+
+        const resolveRecordForIndent = (panel, pageRecordGuid) => {
+            let r = panel && typeof panel.getActiveRecord === 'function'
+                ? panel.getActiveRecord() : null;
+            if (r && typeof r.getLineItems === 'function') return r;
+            const freshPanel = this.ui.getActivePanel && this.ui.getActivePanel();
+            if (freshPanel && typeof freshPanel.getActiveRecord === 'function') {
+                r = freshPanel.getActiveRecord();
+                if (r && typeof r.getLineItems === 'function') return r;
+            }
+            if (pageRecordGuid && this.data && typeof this.data.getRecord === 'function') {
+                r = this.data.getRecord(pageRecordGuid);
+                if (r && typeof r.getLineItems === 'function') return r;
+            }
+            return null;
+        };
+
+        const getVisibleEditorListItems = () => {
+            const editor = document.querySelector(EDITOR_SELECTORS) || document.body;
+            return Array.from(editor.querySelectorAll('.listitem')).filter(
+                li => li.offsetParent !== null && li.style.display !== 'none'
+            );
+        };
+
+        const getDomLinePlainText = (li) => {
+            const lineDiv = li.querySelector(':scope > .line-div') || li.querySelector('.line-div');
+            if (!lineDiv) return '';
+            const clone = lineDiv.cloneNode(true);
+            clone.querySelectorAll('.bt-marker, .bt-bullet, .bt-caret, .listitem-indentline').forEach(el => el.remove());
+            return clone.textContent
+                .replace(/\u200b/g, '')
+                .replace(/\u00a0/g, ' ')
+                .replace(/[\uFEFF\u2060]/g, '')
+                .trim();
+        };
+
+        const lineDomLooksEmpty = (li) => {
+            const t = getDomLinePlainText(li);
+            if (!t.length) return true;
+            const lower = t.toLowerCase();
+            if (lower === 'new line' || lower === 'type here' || lower === 'empty') return true;
+            return false;
+        };
+
+        const pickEmptyRootLineForZoom = (zoomGuid) => {
+            const visibleItems = getVisibleEditorListItems();
+            if (!visibleItems.length) return null;
+            const forZoomGuid = visibleItems.filter(
+                li => li.getAttribute('data-guid') === zoomGuid
+            );
+            if (forZoomGuid.length === 1 && lineDomLooksEmpty(forZoomGuid[0]) &&
+                !forZoomGuid[0].classList.contains('listitem-task')) {
+                return forZoomGuid[0];
+            }
+            const indents = visibleItems.map(li => getItemIndent(li));
+            const minIndent = Math.min(...indents);
+            const atRoot = visibleItems.filter(li =>
+                getItemIndent(li) === minIndent && !li.classList.contains('listitem-task')
+            );
+            if (!atRoot.length) return null;
+            const matchZoom = atRoot.find(li => li.getAttribute('data-guid') === zoomGuid);
+            const firstRoot = matchZoom || atRoot[0];
+            if (!lineDomLooksEmpty(firstRoot)) return null;
+            return firstRoot;
+        };
+
+        const dispatchEditorKey = (key) => {
+            const keyCode = key === 'Tab' ? 9 : (key === 'Home' ? 36 : 0);
+            if (!keyCode) return;
+            const code = key === 'Tab' ? 'Tab' : 'Home';
+            const mk = (type) => new KeyboardEvent(type, {
+                key, code, keyCode, which: keyCode,
+                bubbles: true, cancelable: true, composed: true,
+            });
+            const target = document.querySelector('.editor-wrapper, .page-content, #editor, body');
+            if (!target) return;
+            target.dispatchEvent(mk('keydown'));
+            target.dispatchEvent(mk('keypress'));
+            target.dispatchEvent(mk('keyup'));
+        };
+
+        const childCountForGuid = async (record, guid) => {
+            try {
+                const roots = await record.getLineItems();
+                const item = await findLineItemByGuidAsync(roots, guid);
+                if (!item) return -1;
+                let kids = item.children;
+                if (kids == null && typeof item.getChildren === 'function') {
+                    try { kids = await item.getChildren(); } catch { kids = null; }
+                }
+                return kids ? kids.length : 0;
+            } catch { return -1; }
+        };
+
+        const lastChildGuidForZoom = async (record, zoomGuid) => {
+            try {
+                const roots = await record.getLineItems();
+                const item = await findLineItemByGuidAsync(roots, zoomGuid);
+                if (!item) return null;
+                let kids = item.children;
+                if (kids == null && typeof item.getChildren === 'function') {
+                    try { kids = await item.getChildren(); } catch { kids = null; }
+                }
+                if (!kids || !kids.length) return null;
+                return lineItemGuid(kids[kids.length - 1]);
+            } catch { return null; }
+        };
+
+        const syncNavToItem = async (panel, guid) => {
+            if (!panel || typeof panel.navigateTo !== 'function') return;
+            try {
+                const r = panel.navigateTo({ itemGuid: guid, highlight: false });
+                if (r && typeof r.then === 'function') await r;
+                if (typeof this.ui.setActivePanel === 'function') {
+                    try { this.ui.setActivePanel(panel); } catch {}
+                }
+            } catch {}
+        };
+
+        // Try API-only paths to indent an empty zoomed line UNDER the zoom
+        // target so it becomes the zoom's first child: already-has-children
+        // → nav to first child; empty root line → move it under zoom;
+        // else try to insert a new child.
+        const indentEmptyZoomViaApi = async (panel, zoomGuid, pageRecordGuid) => {
+            const DBG = '[indent-rainbow][zoom-indent]';
+            if (!panel || !zoomGuid) return false;
+
+            const tryCreateChildUnderZoom = async (record, zoomItem, zGuid) => {
+                const insertSteps = [];
+                if (typeof zoomItem.insertChildAt === 'function') {
+                    insertSteps.push(() => zoomItem.insertChildAt(0, ''));
+                }
+                if (typeof zoomItem.appendChild === 'function') {
+                    insertSteps.push(() => zoomItem.appendChild(''));
+                }
+                if (typeof record.insertFromMarkdown === 'function') {
+                    insertSteps.push((p) => record.insertFromMarkdown('- ', p, null));
+                    insertSteps.push((p) => record.insertFromMarkdown('* ', p, null));
+                }
+                for (const step of insertSteps) {
+                    try {
+                        let r2;
+                        try { r2 = await record.getLineItems(); } catch { continue; }
+                        const parent = await findLineItemByGuidAsync(r2, zGuid) || zoomItem;
+                        const n0 = await childCountForGuid(record, zGuid);
+                        if (n0 < 0) continue;
+                        const ok = await step(parent);
+                        if (ok === false) continue;
+                        await waitMs(280);
+                        const n1 = await childCountForGuid(record, zGuid);
+                        if (n1 > n0) {
+                            const g = await lastChildGuidForZoom(record, zGuid);
+                            if (g) return g;
+                        }
+                    } catch (e) {
+                        console.debug(`${DBG} insert variant failed`, e);
+                    }
+                }
+                return null;
+            };
+
+            for (let attempt = 0; attempt < 8; attempt++) {
+                if (attempt > 0) await waitMs(350);
+                let record = resolveRecordForIndent(panel, pageRecordGuid);
+                if (!record) { await waitMs(300); record = resolveRecordForIndent(panel, pageRecordGuid); }
+                if (!record || typeof record.getLineItems !== 'function') continue;
+
+                let roots;
+                try { roots = await record.getLineItems(); } catch { continue; }
+                if (!roots || !roots.length) continue;
+
+                let zoomItem = await findLineItemByGuidAsync(roots, zoomGuid);
+                if (!zoomItem) continue;
+
+                let children = zoomItem.children;
+                if (children == null && typeof zoomItem.getChildren === 'function') {
+                    try { children = await zoomItem.getChildren(); } catch { children = null; }
+                }
+                if (children && children.length > 0) {
+                    const firstGuid = lineItemGuid(children[0]);
+                    if (firstGuid) {
+                        await syncNavToItem(panel, firstGuid);
+                        await waitMs(60);
+                        dispatchEditorKey('Home');
+                        applyZoomStartLineStyle(firstGuid);
+                        return true;
+                    }
+                }
+
+                const emptyRootForMove = pickEmptyRootLineForZoom(zoomGuid);
+                if (emptyRootForMove) {
+                    const domGuid = emptyRootForMove.getAttribute('data-guid');
+                    if (domGuid && domGuid !== zoomGuid) {
+                        try {
+                            try { roots = await record.getLineItems(); } catch {}
+                            let lineToMove = await findLineItemByGuidAsync(roots, domGuid);
+                            let zoomRef = await findLineItemByGuidAsync(roots, zoomGuid);
+                            if (lineToMove && zoomRef && typeof lineToMove.move === 'function') {
+                                const moved = await lineToMove.move(zoomRef, null);
+                                if (moved != null) {
+                                    await waitMs(120);
+                                    await syncNavToItem(panel, domGuid);
+                                    await waitMs(60);
+                                    dispatchEditorKey('Home');
+                                    applyZoomStartLineStyle(domGuid);
+                                    return true;
+                                }
+                                if (typeof lineToMove.getParent === 'function') {
+                                    const parent = await lineToMove.getParent();
+                                    if (parent && lineItemGuid(parent) === zoomGuid) {
+                                        await syncNavToItem(panel, domGuid);
+                                        await waitMs(60);
+                                        dispatchEditorKey('Home');
+                                        applyZoomStartLineStyle(domGuid);
+                                        return true;
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            console.debug(`${DBG} move() failed:`, e);
+                        }
+                    }
+                }
+
+                try {
+                    const newGuid = await tryCreateChildUnderZoom(record, zoomItem, zoomGuid);
+                    if (newGuid) {
+                        await waitMs(150);
+                        await syncNavToItem(panel, newGuid);
+                        await waitMs(60);
+                        dispatchEditorKey('Home');
+                        applyZoomStartLineStyle(newGuid);
+                        return true;
+                    }
+                } catch (e) {
+                    console.debug(`${DBG} tryCreateChildUnderZoom failed:`, e);
+                }
+            }
+            return false;
+        };
+
+        const maybeIndentEmptyZoomedLine = async (panel, zoomGuid, pageRecordGuid) => {
+            let domReady = false;
+            for (let wait = 0; wait < 6; wait++) {
+                await waitMs(wait === 0 ? 400 : 250);
+                const items = getVisibleEditorListItems();
+                if (items.length > 0) { domReady = true; break; }
+            }
+            if (!domReady) return;
+            if (await indentEmptyZoomViaApi(panel, zoomGuid, pageRecordGuid)) return;
+            if (this.ui && typeof this.ui.showToaster === 'function') {
+                this.ui.showToaster({
+                    message: 'Could not add a nested line automatically — use Tab in the editor to indent.',
+                    type: 'warning',
+                    duration: 2500
+                });
+            }
+        };
+
+        // zoom-in: (1) first navigate to record root if we're already zoomed
+        // elsewhere, (2) then navigate with rootId = the target guid. The
+        // setActivePanel call after each navigateTo is what flips the view.
+        const zoomToItem = async (li) => {
+            const guid = li.getAttribute('data-guid') || await resolveLineItemGuid(li);
+            if (!guid) {
+                if (this.ui && typeof this.ui.showToaster === 'function') {
+                    this.ui.showToaster({
+                        message: 'Could not resolve item to zoom into',
+                        type: 'warning',
+                        duration: 1500
+                    });
+                }
+                return;
+            }
+            const panel = this.ui.getActivePanel && this.ui.getActivePanel();
+            if (!panel || typeof panel.navigateTo !== 'function') return;
+            const currentNav = (typeof panel.getNavigation === 'function'
+                ? panel.getNavigation() : null) || {};
+            const record = panel.getActiveRecord && panel.getActiveRecord();
+            const recordGuid = (record && typeof record.getGuid === 'function'
+                ? record.getGuid() : null) || currentNav.rootId || null;
+            const pageRecordGuid = record && typeof record.getGuid === 'function'
+                ? record.getGuid() : null;
+            const workspaceGuid = currentNav.workspaceGuid
+                || (typeof this.getWorkspaceGuid === 'function' ? this.getWorkspaceGuid() : null);
+            if (!recordGuid) return;
+
+            const type = currentNav.type || 'edit_panel';
+            const doNav = async (p, nav) => {
+                const r = p.navigateTo(nav);
+                if (r && typeof r.then === 'function') await r;
+                if (typeof this.ui.setActivePanel === 'function') {
+                    try { this.ui.setActivePanel(p); } catch {}
+                }
+            };
+
+            try {
+                if (currentNav.rootId !== recordGuid) {
+                    await doNav(panel, { type, rootId: recordGuid, workspaceGuid });
+                    await waitMs(350);
+                }
+                await doNav(panel, { type, rootId: guid, workspaceGuid });
+                await waitMs(50);
+                syncLineZoomContext();
+                const afterZoom = typeof panel.getNavigation === 'function'
+                    ? panel.getNavigation() : {};
+                if (afterZoom && afterZoom.rootId === guid) {
+                    void maybeIndentEmptyZoomedLine(panel, guid, pageRecordGuid);
+                    return;
+                }
+                await doNav(panel, { itemGuid: guid, highlight: true });
+            } catch (err) {
+                console.warn('[indent-rainbow] zoom failed:', err);
+            }
+        };
+
+        // Unified click handler on the editor container (capture phase).
+        const outlineClickHandler = (e) => {
+            if (!isEnabled) return;
+            const target = e.target;
+            if (!target || !target.closest) return;
+
+            const bullet = target.closest('.bt-bullet');
+            if (bullet && isBulletsEnabled) {
+                const li = bullet.closest('.listitem');
+                if (li) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    zoomToItem(li);
+                    return;
+                }
+            }
+
+            const caret = target.closest('.bt-caret');
+            if (caret && isTogglesEnabled) {
+                const li = caret.closest('.listitem');
+                if (li && li.classList.contains('bt-has-children')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    li.classList.toggle('bt-collapsed');
+                    applyCollapseState();
+                }
+                return;
+            }
+        };
+
+        outlineTarget.addEventListener('click', outlineClickHandler, true);
+        this.cleanupMethods.push(() => {
+            outlineTarget.removeEventListener('click', outlineClickHandler, true);
+        });
+
+        // Line-item created hook: when a new line is created while zoomed
+        // and it's not under the zoom subtree, move it under the zoom root
+        // so Enter-to-create works correctly inside a zoom.
+        syncLineZoomContext();
+        const handleLineItemCreatedForZoom = async (ev) => {
+            if (!ev || ev.eventName !== 'lineitem.created') return;
+            if (this._zoomReparentBusy) return;
+            const zoomGuid = this.lineZoomRootGuid;
+            if (!zoomGuid) return;
+            const newGuid = ev.lineItemGuid;
+            if (!newGuid || newGuid === zoomGuid) return;
+            const panel = this.ui.getActivePanel && this.ui.getActivePanel();
+            const record = panel && panel.getActiveRecord && panel.getActiveRecord();
+            if (!record || typeof record.getLineItems !== 'function') return;
+            if (ev.recordGuid && typeof record.getGuid === 'function'
+                && record.getGuid() !== ev.recordGuid) return;
+            const parentGuid = ev.parentGuid != null ? ev.parentGuid : null;
+            if (parentGuid) {
+                const under = await isLineUnderZoomSubtree(record, parentGuid, zoomGuid);
+                if (under) return;
+            }
+            let roots;
+            try { roots = await record.getLineItems(); } catch { return; }
+            const newItem = await findLineItemByGuidAsync(roots, newGuid);
+            const zoomItem = await findLineItemByGuidAsync(roots, zoomGuid);
+            if (!newItem || !zoomItem) return;
+            if (typeof newItem.move !== 'function') return;
+            this._zoomReparentBusy = true;
+            try {
+                await newItem.move(zoomItem, null);
+                await waitMs(60);
+                if (panel && typeof panel.navigateTo === 'function') {
+                    try { panel.navigateTo({ itemGuid: newGuid, highlight: false }); } catch {}
+                }
+            } catch (err) {
+                console.warn('[indent-rainbow] zoom reparent failed:', err);
+            } finally {
+                this._zoomReparentBusy = false;
+            }
+        };
+
+        if (typeof this.on === 'function') {
+            this.on('lineitem.created', handleLineItemCreatedForZoom);
+            this.cleanupMethods.push(() => {
+                if (typeof this.off === 'function') {
+                    try { this.off('lineitem.created', handleLineItemCreatedForZoom); } catch {}
+                }
+            });
+        }
+
         // Ensure closed-over DOM references are released on unload
         let statusBarItem = null;
         this.cleanupMethods.push(() => {
@@ -690,6 +1723,8 @@ body.ir-enabled [data-theme="dark"] .listitem-indentline {
             if (newSettings.currentOpacity !== undefined) currentOpacity = parseFloat(newSettings.currentOpacity);
             if (newSettings.isEnabled !== undefined) isEnabled = newSettings.isEnabled;
             if (newSettings.threadingMode !== undefined) threadingMode = newSettings.threadingMode;
+            if (newSettings.isBulletsEnabled !== undefined) isBulletsEnabled = !!newSettings.isBulletsEnabled;
+            if (newSettings.isTogglesEnabled !== undefined) isTogglesEnabled = !!newSettings.isTogglesEnabled;
             if (newSettings.currentScheme !== undefined) applySchemeVars(currentScheme);
             applySettingVars();
             applyEnabledState();
@@ -699,6 +1734,22 @@ body.ir-enabled [data-theme="dark"] .listitem-indentline {
             } else {
                 clearListColors();
             }
+            // Re-sync outline markers / classes when toggles change (or the
+            // master switch flips). Disabled-state teardown is handled by
+            // annotateAll() itself.
+            if (newSettings.isBulletsEnabled !== undefined
+                || newSettings.isTogglesEnabled !== undefined
+                || newSettings.isEnabled !== undefined) {
+                // If disabling toggles, clear any collapsed rows first so
+                // hidden descendants come back immediately.
+                if (newSettings.isTogglesEnabled !== undefined && !isTogglesEnabled) {
+                    document.querySelectorAll('.listitem.bt-collapsed').forEach(el => {
+                        el.classList.remove('bt-collapsed');
+                    });
+                }
+                scheduleOutlinePass();
+            }
+            if (!isEnabled) this.lineZoomRootGuid = null;
             if (statusBarItem && typeof statusBarItem.setTooltip === 'function') {
                 statusBarItem.setTooltip(`Indent Rainbow – ${colorSchemes[currentScheme]?.name ?? currentScheme}`);
             }
@@ -708,7 +1759,10 @@ body.ir-enabled [data-theme="dark"] .listitem-indentline {
         this.ui.registerCustomPanelType("indent-rainbow-settings", (panel) => {
             this.renderSettingsUI(panel, {
                 colorSchemes, opacityPresets,
-                getSettings: () => ({ currentScheme, currentWidth, activeWidth, currentOpacity, isEnabled, threadingMode }),
+                getSettings: () => ({
+                    currentScheme, currentWidth, activeWidth, currentOpacity,
+                    isEnabled, threadingMode, isBulletsEnabled, isTogglesEnabled
+                }),
                 updateSettings,
                 createIcon: (name) => this.ui.createIcon(name)
             });
@@ -754,7 +1808,7 @@ body.ir-enabled [data-theme="dark"] .listitem-indentline {
 
         document.querySelectorAll('.bt-active-highlight').forEach(el => el.remove());
         document.querySelectorAll('.bt-focused').forEach(el => el.classList.remove('bt-focused'));
-        document.body.classList.remove('ir-enabled');
+        document.body.classList.remove('ir-enabled', 'bt-bullets', 'bt-toggles');
 
         if (this.styleElement) {
             this.styleElement.remove();
@@ -1336,6 +2390,51 @@ body.ir-enabled [data-theme="dark"] .listitem-indentline {
         threadCard.appendChild(createField('Active Thread Width', 'Set how strongly the currently focused hierarchy path stands out.', aWidthGroup, null, 'ir-slider-control'));
 
         container.appendChild(threadCard);
+
+        // -------------------------------------------------------
+        // Outline Card (Workflowy-style bullets + carets)
+        // -------------------------------------------------------
+        const outlineCard = document.createElement('div');
+        outlineCard.className = 'ir-card';
+        const outlineTitle = document.createElement('h3');
+        outlineTitle.appendChild(api.createIcon('list'));
+        outlineTitle.appendChild(document.createTextNode(' Outline'));
+        outlineCard.appendChild(outlineTitle);
+        const outlineCopy = document.createElement('p');
+        outlineCopy.className = 'ir-card-copy';
+        outlineCopy.textContent = 'Add Workflowy-style bullets (click to zoom into a row) and disclosure chevrons (click to collapse rows with sub-items).';
+        outlineCard.appendChild(outlineCopy);
+
+        const bulletsCheckbox = document.createElement('input');
+        bulletsCheckbox.type = 'checkbox';
+        bulletsCheckbox.className = 'ir-checkbox';
+        bulletsCheckbox.checked = !!currentSettings.isBulletsEnabled;
+        bulletsCheckbox.addEventListener('change', (e) => {
+            currentSettings.isBulletsEnabled = e.target.checked;
+            api.updateSettings({ isBulletsEnabled: e.target.checked });
+        });
+        outlineCard.appendChild(createField(
+            'Workflowy Bullets',
+            'Click a bullet to zoom into that row. Headings, text, and list items all get bullets.',
+            bulletsCheckbox
+        ));
+
+        const togglesCheckbox = document.createElement('input');
+        togglesCheckbox.type = 'checkbox';
+        togglesCheckbox.className = 'ir-checkbox';
+        togglesCheckbox.checked = !!currentSettings.isTogglesEnabled;
+        togglesCheckbox.addEventListener('change', (e) => {
+            currentSettings.isTogglesEnabled = e.target.checked;
+            api.updateSettings({ isTogglesEnabled: e.target.checked });
+        });
+        outlineCard.appendChild(createField(
+            'Disclosure Chevrons',
+            'Show a chevron on rows that have sub-items; click to collapse / expand.',
+            togglesCheckbox
+        ));
+
+        container.appendChild(outlineCard);
+
         element.appendChild(container);
     }
 }
