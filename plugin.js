@@ -495,18 +495,25 @@ body.ir-enabled.bt-bullets .item-drag-handle:hover::after {
     opacity: 0.95;
 }
 
-/* Shift the drag-handle LEFT, into the row's left gutter where its
-   native hit zone already lives. Before this, a positive translate
-   moved the visible dotted ring to the RIGHT of .bt-marker — but
-   Thymer's hover hit-test still fired from the gutter, so users got
-   a drag/options menu from hovering an area that looked empty. The
-   negative shift parks the ring 20-30px left of the bt-caret column,
-   matching the hit zone and leaving .bt-caret as the right-most icon
-   on the row. Transform leaves Thymer's absolute top/left intact so
-   the handle still tracks the hovered row vertically. */
-body.ir-enabled.bt-toggles .item-drag-handle,
-body.ir-enabled.bt-bullets .item-drag-handle {
+/* Shift the drag-handle LEFT into the row's gutter for the two single-
+   feature states (caret-only or bullet-only). This keeps the ring on
+   top of Thymer's native hit zone and 20-30px left of the bt-caret,
+   matching the "popup on left, caret on right" layout the user
+   confirmed looks correct in caret-only mode. */
+body.ir-enabled.bt-toggles:not(.bt-bullets) .item-drag-handle,
+body.ir-enabled.bt-bullets:not(.bt-toggles) .item-drag-handle {
     transform: translateX(-25px);
+}
+
+/* When BOTH features are on, let Thymer position the .link-menu popup
+   naturally. With collapse/expand/zoom all display:none'd above, the
+   popup shrinks to fit just the drag-handle, producing the same
+   "circle in a rounded rect, sitting left of the caret" visual as the
+   caret-only state minus the zoom arrow. An explicit transform here
+   tends to push the ring OUT of the popup's rounded-rect background
+   since the popup doesn't reflow to follow transformed children. */
+body.ir-enabled.bt-toggles.bt-bullets .item-drag-handle {
+    transform: none;
 }
 
 /* NOTE: do NOT hide .link-menu wholesale — the .item-drag-handle is
