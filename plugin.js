@@ -495,22 +495,18 @@ body.ir-enabled.bt-bullets .item-drag-handle:hover::after {
     opacity: 0.95;
 }
 
-/* Shift the drag-handle right of our .bt-marker so its native 2px
-   dotted border no longer stacks on top of the .bt-caret / .bt-bullet
-   column. Thymer positions the handle at the row's left gutter; our
-   marker occupies that gutter now, so we translate the handle out of
-   the way. Transform leaves the handle's layout position untouched —
-   Thymer's absolute top/left (which follows the cursor) is unchanged;
-   we just add a visual offset. Shift amount depends on which outline
-   features are enabled (marker width ≈ caret 18 + gap 2 + bullet 16). */
-body.ir-enabled.bt-toggles:not(.bt-bullets) .item-drag-handle {
-    transform: translateX(22px);
-}
-body.ir-enabled.bt-bullets:not(.bt-toggles) .item-drag-handle {
-    transform: translateX(20px);
-}
-body.ir-enabled.bt-toggles.bt-bullets .item-drag-handle {
-    transform: translateX(20px);
+/* Shift the drag-handle LEFT, into the row's left gutter where its
+   native hit zone already lives. Before this, a positive translate
+   moved the visible dotted ring to the RIGHT of .bt-marker — but
+   Thymer's hover hit-test still fired from the gutter, so users got
+   a drag/options menu from hovering an area that looked empty. The
+   negative shift parks the ring 20-30px left of the bt-caret column,
+   matching the hit zone and leaving .bt-caret as the right-most icon
+   on the row. Transform leaves Thymer's absolute top/left intact so
+   the handle still tracks the hovered row vertically. */
+body.ir-enabled.bt-toggles .item-drag-handle,
+body.ir-enabled.bt-bullets .item-drag-handle {
+    transform: translateX(-25px);
 }
 
 /* NOTE: do NOT hide .link-menu wholesale — the .item-drag-handle is
