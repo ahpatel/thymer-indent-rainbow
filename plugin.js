@@ -313,7 +313,7 @@ body.ir-enabled .bt-marker {
        small 0.15em downward translate scales with font-size so
        headings and body both land on the native bullet row. Tweak
        --bt-marker-nudge to shift if Thymer's text metrics change. */
-    --bt-marker-nudge: 0.15em;
+    --bt-marker-nudge: .25em;
     transform: translateY(var(--bt-marker-nudge));
     user-select: none;
     flex-shrink: 0;
