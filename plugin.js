@@ -290,12 +290,16 @@ body.ir-enabled [data-theme="dark"] .listitem-indentline {
 body.ir-enabled .bt-marker {
     display: none;
     box-sizing: border-box;
-    height: 1.6em;           /* fallback for engines without 1lh */
-    height: 1lh;
     align-items: center;
     justify-content: flex-start;
     gap: 2px;
-    vertical-align: top;
+    /* vertical-align: middle sits the marker on the parent's text mid-
+       line (baseline + x-height/2). That works across body text and
+       headings without the marker needing to know the row's font-size,
+       whereas a fixed 1lh height inherits the .listitem body line-
+       height and puts the marker at the TOP of a taller heading line-
+       box. */
+    vertical-align: middle;
     user-select: none;
     flex-shrink: 0;
     position: relative;
@@ -324,6 +328,11 @@ body.ir-enabled .bt-caret {
     transition: opacity 0.12s ease, transform 0.12s ease;
     flex-shrink: 0;
     transform-origin: center;
+    /* 1px visual nudge so the chevron's center lines up with the
+       rainbow indent guide that sits at the row's margin-left. Uses
+       transform (not margin) so sibling layout (.bt-bullet column) is
+       unaffected. */
+    transform: translateX(1px);
 }
 
 /* Reserve space for the caret on every row (visible or not) so bullets
@@ -446,9 +455,12 @@ body.ir-enabled.bt-toggles .link-menu .link-menu-action-expand {
     display: none !important;
 }
 
-body.ir-enabled.bt-toggles .item-drag-handle {
-    position: relative;
-}
+/* NOTE: do NOT set position on .item-drag-handle. Thymer positions it
+   absolutely with inline top/left; forcing position: relative reverts
+   it to static flow, yanking the handle (and the link-menu it opens)
+   to the bottom of .listview-overlaybuttons. The native position is
+   already a positioning context, so ::after's position: absolute
+   anchors to the handle as-is. */
 body.ir-enabled.bt-toggles .item-drag-handle .handle-fold-icon {
     visibility: hidden;
 }
