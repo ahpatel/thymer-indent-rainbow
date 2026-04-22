@@ -470,15 +470,18 @@ body.ir-enabled.bt-bullets .link-menu .link-menu-action-zoom {
    (Thymer keeps its position: absolute), so the hover menu continues
    to follow the cursor. display: none on the SVG removes it from the
    flex flow so the ::after is the sole centered child. */
-body.ir-enabled.bt-toggles .item-drag-handle {
+body.ir-enabled.bt-toggles .item-drag-handle,
+body.ir-enabled.bt-bullets .item-drag-handle {
     display: flex !important;
     align-items: center;
     justify-content: center;
 }
-body.ir-enabled.bt-toggles .item-drag-handle .handle-fold-icon {
+body.ir-enabled.bt-toggles .item-drag-handle .handle-fold-icon,
+body.ir-enabled.bt-bullets .item-drag-handle .handle-fold-icon {
     display: none;
 }
-body.ir-enabled.bt-toggles .item-drag-handle::after {
+body.ir-enabled.bt-toggles .item-drag-handle::after,
+body.ir-enabled.bt-bullets .item-drag-handle::after {
     content: "…";              /* HORIZONTAL ELLIPSIS U+2026 */
     font-size: 18px;
     line-height: 1;
@@ -487,8 +490,38 @@ body.ir-enabled.bt-toggles .item-drag-handle::after {
     pointer-events: none;      /* clicks pass through to .item-drag-handle */
     letter-spacing: 1px;
 }
-body.ir-enabled.bt-toggles .item-drag-handle:hover::after {
+body.ir-enabled.bt-toggles .item-drag-handle:hover::after,
+body.ir-enabled.bt-bullets .item-drag-handle:hover::after {
     opacity: 0.95;
+}
+
+/* Shift the drag-handle right of our .bt-marker so its native 2px
+   dotted border no longer stacks on top of the .bt-caret / .bt-bullet
+   column. Thymer positions the handle at the row's left gutter; our
+   marker occupies that gutter now, so we translate the handle out of
+   the way. Transform leaves the handle's layout position untouched —
+   Thymer's absolute top/left (which follows the cursor) is unchanged;
+   we just add a visual offset. Shift amount depends on which outline
+   features are enabled (marker width ≈ caret 18 + gap 2 + bullet 16). */
+body.ir-enabled.bt-toggles:not(.bt-bullets) .item-drag-handle {
+    transform: translateX(22px);
+}
+body.ir-enabled.bt-bullets:not(.bt-toggles) .item-drag-handle {
+    transform: translateX(20px);
+}
+body.ir-enabled.bt-toggles.bt-bullets .item-drag-handle {
+    transform: translateX(40px);
+}
+
+/* When both outline features are on, every action inside .link-menu
+   is hidden (collapse/expand by .bt-toggles, zoom by .bt-bullets), so
+   the floating popup would appear empty. Hide it entirely to keep the
+   hover surface clean — only the drag-handle (with its dots ring)
+   remains visible on hover, which is exactly the affordance the user
+   asked for. If either feature is off, the relevant native action
+   comes back and .link-menu keeps displaying. */
+body.ir-enabled.bt-toggles.bt-bullets .link-menu {
+    display: none !important;
 }
 `;
 
