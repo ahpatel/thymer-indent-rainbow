@@ -455,22 +455,23 @@ body.ir-enabled.bt-toggles .link-menu .link-menu-action-expand {
     display: none !important;
 }
 
-/* NOTE: do NOT set position on .item-drag-handle. Thymer positions it
-   absolutely with inline top/left; forcing position: relative reverts
-   it to static flow, yanking the handle (and the link-menu it opens)
-   to the bottom of .listview-overlaybuttons. The native position is
-   already a positioning context, so ::after's position: absolute
-   anchors to the handle as-is. */
+/* Replace the drag-handle's fold-icon SVG with a dots glyph. We use
+   flex layout on the handle itself to center the ::after, instead of
+   position: absolute + inset: 0. Flex only changes how CHILDREN are
+   laid out; it does NOT touch the handle's own positioning scheme
+   (Thymer keeps its position: absolute), so the hover menu continues
+   to follow the cursor. display: none on the SVG removes it from the
+   flex flow so the ::after is the sole centered child. */
+body.ir-enabled.bt-toggles .item-drag-handle {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+}
 body.ir-enabled.bt-toggles .item-drag-handle .handle-fold-icon {
-    visibility: hidden;
+    display: none;
 }
 body.ir-enabled.bt-toggles .item-drag-handle::after {
     content: "…";              /* HORIZONTAL ELLIPSIS U+2026 */
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
     font-size: 18px;
     line-height: 1;
     color: currentColor;
