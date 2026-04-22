@@ -455,6 +455,14 @@ body.ir-enabled.bt-toggles .link-menu .link-menu-action-expand {
     display: none !important;
 }
 
+/* Hide the native link-menu zoom arrow when our Workflowy bullets are
+   active — clicking the bullet already zooms, so ↗ in the hover menu
+   is redundant. Gated on bt-bullets so disabling the bullet setting
+   restores the native zoom affordance. */
+body.ir-enabled.bt-bullets .link-menu .link-menu-action-zoom {
+    display: none !important;
+}
+
 /* Replace the drag-handle's fold-icon SVG with a dots glyph. We use
    flex layout on the handle itself to center the ::after, instead of
    position: absolute + inset: 0. Flex only changes how CHILDREN are
