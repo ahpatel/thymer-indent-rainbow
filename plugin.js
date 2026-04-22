@@ -434,19 +434,42 @@ body.ir-enabled .listitem.bt-zoom-start-line > .line-div {
 }
 
 /* ---------- Hover-menu adjustments when our caret is active ----------
-     1. Hide the native collapse/expand chevrons (our .bt-caret is the
-        single collapse affordance).
-     2. Force-show the native options (dots) button, which Thymer hides
-        per-row with an inline display:none; our !important wins since
-        Thymer's inline style has no !important. It naturally sits in
-        DOM position 1 of .link-menu, so after collapse/expand are
-        hidden it fills the slot where collapse used to be. ---------- */
+     1. Hide the native collapse/expand chevrons in .link-menu (our
+        .bt-caret is the single collapse affordance).
+     2. Replace the fold-icon SVG inside .item-drag-handle with a dots
+        glyph, so the drag/options affordance is visually obvious and
+        the click zone lands directly on what the user sees. (Force-
+        showing .link-menu-action-options doesn't work because Thymer's
+        action handlers only fire when the link-menu is activated by
+        a real drag-handle hover; clicks on a CSS-revealed options
+        button are no-ops.) ---------- */
 body.ir-enabled.bt-toggles .link-menu .link-menu-action-collapse,
 body.ir-enabled.bt-toggles .link-menu .link-menu-action-expand {
     display: none !important;
 }
-body.ir-enabled.bt-toggles .link-menu .link-menu-action-options {
-    display: inline-flex !important;
+
+body.ir-enabled.bt-toggles .item-drag-handle {
+    position: relative;
+}
+body.ir-enabled.bt-toggles .item-drag-handle .handle-fold-icon {
+    visibility: hidden;
+}
+body.ir-enabled.bt-toggles .item-drag-handle::after {
+    content: "…";              /* HORIZONTAL ELLIPSIS U+2026 */
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    line-height: 1;
+    color: currentColor;
+    opacity: 0.55;
+    pointer-events: none;      /* clicks pass through to .item-drag-handle */
+    letter-spacing: 1px;
+}
+body.ir-enabled.bt-toggles .item-drag-handle:hover::after {
+    opacity: 0.95;
 }
 `;
 
