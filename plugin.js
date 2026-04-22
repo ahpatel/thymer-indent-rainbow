@@ -218,19 +218,19 @@ body.ir-enabled .listitem-olist .listitem-indentline {
 
 /* Base: nudge applies to every indent line (catches headings + text + task). */
 body.ir-enabled .listitem-indentline {
-    transform: translateX(var(--ir-align-nudge)) !important;
+    transform: translateX(calc(-2px + var(--ir-align-nudge))) !important;
 }
 
 /* Align bullet indent line with text/heading guides, then apply the global
    nudge. Bullet items sit 6.75px left of text items of the same level. */
 body.ir-enabled .listitem-ulist .listitem-indentline {
-    transform: translateX(calc(6.75px + var(--ir-align-nudge))) !important;
+    transform: translateX(calc(5px + var(--ir-align-nudge))) !important;
 }
 
 /* Align numbered-list indent line with text/heading guides, then apply the
    global nudge. Numbered items sit 2.63px right of text items of same level. */
 body.ir-enabled .listitem-olist .listitem-indentline {
-    transform: translateX(calc(-2.63px + var(--ir-align-nudge))) !important;
+    transform: translateX(calc(-3.5px + var(--ir-align-nudge))) !important;
 }
 
 /* Ensure indent lines are visible for all item types */
@@ -293,13 +293,28 @@ body.ir-enabled .bt-marker {
     align-items: center;
     justify-content: flex-start;
     gap: 2px;
-    /* vertical-align: middle sits the marker on the parent's text mid-
-       line (baseline + x-height/2). That works across body text and
-       headings without the marker needing to know the row's font-size,
-       whereas a fixed 1lh height inherits the .listitem body line-
-       height and puts the marker at the TOP of a taller heading line-
-       box. */
-    vertical-align: middle;
+    /* Anchor marker to the FIRST line of the row. We set BOTH:
+       - align-self: baseline   -> for when .listitem is a flex
+         container (the common case in Thymer): the marker becomes a
+         flex item and aligns its baseline to the container's first
+         baseline, which is the first text line's baseline.
+       - vertical-align: baseline -> for when the marker is laid out
+         inline (non-flex fallback). Inline-flex's baseline is the
+         baseline of its first flex child, so caret + bullet sit on
+         the surrounding text's baseline.
+       Together these pin the marker to the first line across
+       headings, body, and wrapped rows without relying on line-height
+       heuristics. */
+    align-self: baseline;
+    vertical-align: baseline;
+    /* Fine-tune nudge: align-self: baseline lifts the marker slightly
+       above the native bullet column because the caret/bullet's own
+       baseline (fixed-size icons) sits above the text x-height. A
+       small 0.15em downward translate scales with font-size so
+       headings and body both land on the native bullet row. Tweak
+       --bt-marker-nudge to shift if Thymer's text metrics change. */
+    --bt-marker-nudge: 0.15em;
+    transform: translateY(var(--bt-marker-nudge));
     user-select: none;
     flex-shrink: 0;
     position: relative;
@@ -319,7 +334,7 @@ body.ir-enabled .bt-caret {
     width: 18px;
     height: 18px;
     align-items: center;
-    justify-content: center;
+    justify-content: left;
     font-size: 14px;           /* Tabler chevrons read better a bit bigger */
     line-height: 1;
     color: currentColor;
@@ -332,7 +347,7 @@ body.ir-enabled .bt-caret {
        rainbow indent guide that sits at the row's margin-left. Uses
        transform (not margin) so sibling layout (.bt-bullet column) is
        unaffected. */
-    transform: translateX(-.25px);
+    transform: translateX(1px);
 }
 
 /* Reserve space for the caret on every row (visible or not) so bullets
@@ -450,15 +465,15 @@ body.ir-enabled .listitem.bt-zoom-start-line > .line-div {
         action handlers only fire when the link-menu is activated by
         a real drag-handle hover; clicks on a CSS-revealed options
         button are no-ops.) ---------- */
-/* Hide native collapse/expand from the link-menu ONLY in caret-only
-   state (bt-toggles on, bt-bullets off). In that state the popup
-   reads [drag-handle][zoom] (54pt) and .bt-caret in the row handles
-   collapse. In both-on, we intentionally KEEP native collapse/expand
-   visible so the popup reads [drag-handle][toggle-caret] (54pt) per
-   user preference — the row still carries .bt-caret, so the popup
-   chevron is a secondary affordance while the popup is open. */
-body.ir-enabled.bt-toggles:not(.bt-bullets) .link-menu .link-menu-action-collapse,
-body.ir-enabled.bt-toggles:not(.bt-bullets) .link-menu .link-menu-action-expand {
+/* Hide native collapse/expand from the link-menu whenever our in-row
+   .bt-caret is active (body.bt-toggles). The row caret is the single
+   collapse affordance — regardless of whether bullets are also on.
+   Caret-only popup reads [drag-handle][zoom] (54pt). Both-on popup
+   reads [drag-handle] only (27pt; zoom is also hidden when bullets
+   are on — see rule below), leaving the in-row .bt-caret unobstructed
+   to the right of the popup. */
+body.ir-enabled.bt-toggles .link-menu .link-menu-action-collapse,
+body.ir-enabled.bt-toggles .link-menu .link-menu-action-expand {
     display: none !important;
 }
 
@@ -483,13 +498,33 @@ body.ir-enabled.bt-bullets .item-drag-handle {
     align-items: center;
     justify-content: center;
 }
+
+/* Pin the drag-handle popup to the FIRST line of wrapped rows (mirrors
+   the .bt-marker alignment fix). Thymer positions .item-drag-handle
+   absolutely and centers it vertically on the listitem's full box, so
+   on wrapped rows the circle floats between lines. Overriding top to
+   (1lh - 30px) / 2 lands the 27px circle's vertical center on the
+   first-line midline regardless of row height. bottom: auto prevents
+   Thymer's bottom-anchor from fighting our top. */
+body.ir-enabled.bt-toggles .item-drag-handle,
+body.ir-enabled.bt-bullets .item-drag-handle {
+    /* Pin the circle to the row's FIRST text baseline, matching where
+       .bt-marker's caret + bullet land. We measure from the top of
+       the row: 'top: calc(.5em - 13.5px)' puts the circle's vertical
+       center on the baseline of the first line's em-box (approx.
+       text baseline), regardless of the row's total height on
+       wrapped rows. 1em resolves to the listitem's own font-size, so
+       headings and body text both line up. */
+    top: calc(1em - 13.5px) !important;
+    bottom: auto !important;
+}
 body.ir-enabled.bt-toggles .item-drag-handle .handle-fold-icon,
 body.ir-enabled.bt-bullets .item-drag-handle .handle-fold-icon {
     display: none;
 }
 body.ir-enabled.bt-toggles .item-drag-handle::after,
 body.ir-enabled.bt-bullets .item-drag-handle::after {
-    content: "…";              /* HORIZONTAL ELLIPSIS U+2026 */
+    content: " ";              
     font-size: 18px;
     line-height: 1;
     color: currentColor;
@@ -528,21 +563,60 @@ body.ir-enabled .link-menu > .item-drag-handle {
    oval whose hit-zone (full 27px slot) did not visually match the
    narrower dotted ring — so hovering the empty slot edge was firing
    the drag/options menu while hovering the visible ring looked inert.
-   Matching width to height ties the hit-zone to what the user sees. */
-body.ir-enabled .link-menu > .item-drag-handle {
+   Matching width to height ties the hit-zone to what the user sees.
+   The drag-handle is placed first in DOM order by a MutationObserver
+   (see link-menu observer below) — CSS 'order' appeared to desync
+   Thymer's hit-zone from the visible ring in some states, so we do
+   a real reparent instead. */
+body.ir-enabled.bt-toggles .link-menu > .item-drag-handle,
+body.ir-enabled.bt-bullets .link-menu > .item-drag-handle {
     height: 27px !important;
-    order: -1;  /* circle always on the left of the popup */
 }
 
-/* When BOTH outline features are on, hide the row's .bt-caret — the
-   popup now carries a toggle-caret in its right slot, and keeping
-   both produces a redundant double-chevron (one fixed in the row,
-   one inside the hover popup). Bullet-only and caret-only states
-   keep .bt-caret in the row since the popup either lacks a toggle
-   affordance (bullet-only) or uses zoom in the right slot (caret-
-   only). */
-body.ir-enabled.bt-toggles.bt-bullets .bt-caret {
-    display: none !important;
+/* Both-on: shift ONLY the drag-handle (the visible circle) 27px to the
+   left using 'position: relative; left: -27px'. 'left' (unlike
+   'transform') updates offsetLeft / layout origin, so both the visible
+   ring AND its hover/click hit-zone move together. The '.link-menu'
+   wrapper stays at its natural 27pt width and original position, so
+   Thymer's own popup anchoring is untouched. Scoped to both-on only;
+   single-feature/native states are unchanged. */
+/* Shrink the .link-menu container's pointer/layout footprint to the
+   27pt drag-handle slot so the rest of the popup's box doesn't cover
+   and steal clicks from the in-row .bt-caret. overflow: visible lets
+   the drag-handle's left/transform offsets paint outside the shrunk
+   container. pointer-events: none on the container + auto on the
+   drag-handle keeps the circle interactive while letting clicks on
+   the caret column pass through to .bt-caret underneath. */
+body.ir-enabled.bt-toggles.bt-bullets .link-menu {
+    width: 27px !important;
+    min-width: 27px !important;
+    max-width: 27px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    pointer-events: none !important;
+    background: transparent !important;
+    border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+}
+/* Kill any pseudo-element chrome (dashed outlines, highlight rings,
+   etc.) the native stylesheet draws on .link-menu so only the
+   drag-handle's own circle remains visible in both-on. */
+body.ir-enabled.bt-toggles.bt-bullets .link-menu::before,
+body.ir-enabled.bt-toggles.bt-bullets .link-menu::after {
+    content: none !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
+    pointer-events: auto !important;
+    position: relative !important;
+    left: -27px !important;
+    /* Visual-only nudge: the hit-zone (set by 'left' above) is correct, but the painted ring sits ~20px too far right. transform shifts paint without touching layout, so the hit-zone stays put while the circle visually aligns with the drag-gutter. */
+    transform: translateX(0px) !important;
 }
 `;
 
@@ -789,17 +863,24 @@ body.ir-enabled.bt-toggles.bt-bullets .bt-caret {
             }
         };
 
+        // Resolved once here (earlier than its original site) because the
+        // caret-class observer below now scopes to this container too.
+        const editorContainer = document.querySelector('.editor-wrapper, .page-content, #editor') || document.body;
+
+        // Track the active RAF id so unload can cancel it (S8).
+        let focusedItemRafId = 0;
         const scheduleUpdate = (node) => {
             if (rafPending) return;
             rafPending = true;
-            requestAnimationFrame(() => updateFocusedItem(node));
+            focusedItemRafId = requestAnimationFrame(() => updateFocusedItem(node));
         };
 
-        // Watch for the .listitem-with-caret class toggle anywhere in the DOM.
+        // Watch for the .listitem-with-caret class toggle inside the editor.
         const setupCaretClassObserver = () => {
             if (this.isUnloaded) return;
 
             const observer = new MutationObserver((mutations) => {
+                if (this.isUnloaded) return;
                 for (const m of mutations) {
                     if (m.type !== 'attributes' || m.attributeName !== 'class') continue;
                     const el = m.target;
@@ -818,7 +899,7 @@ body.ir-enabled.bt-toggles.bt-bullets .bt-caret {
                 }
             });
 
-            observer.observe(document.body, {
+            observer.observe(editorContainer, {
                 subtree: true,
                 attributes: true,
                 attributeFilter: ['class'],
@@ -842,12 +923,21 @@ body.ir-enabled.bt-toggles.bt-bullets .bt-caret {
             if (!indentLine) return;
 
             const lineDiv = item.querySelector('.line-div');
-            const isEmpty = lineDiv
-                ? !Array.from(lineDiv.childNodes).some(n =>
-                    !(n.nodeType === 1 && (n.classList?.contains('listitem-indentline') || n.classList?.contains('bt-active-highlight')))
-                    && (n.textContent || '').trim().length > 0
-                  )
-                : !(item.textContent || '').trim();
+            // S2: zero-alloc empty-check. Walk childNodes directly instead
+            // of Array.from(...).some(...) which allocates per call.
+            let isEmpty;
+            if (lineDiv) {
+                isEmpty = true;
+                for (const n of lineDiv.childNodes) {
+                    if (n.nodeType === 1 && n.classList
+                        && (n.classList.contains('listitem-indentline')
+                            || n.classList.contains('bt-active-highlight'))) continue;
+                    const txt = n.textContent;
+                    if (txt && txt.trim().length > 0) { isEmpty = false; break; }
+                }
+            } else {
+                isEmpty = !(item.textContent || '').trim();
+            }
 
             if (isEmpty) {
                 indentLine.style.setProperty('display', 'none', 'important');
@@ -896,8 +986,9 @@ body.ir-enabled.bt-toggles.bt-bullets .bt-caret {
             if (items) items.forEach(i => pendingItems.add(i));
             if (!listColorRafPending) {
                 listColorRafPending = true;
-                requestAnimationFrame(() => {
+                listColorRafId = requestAnimationFrame(() => {
                     listColorRafPending = false;
+                    if (this.isUnloaded) return;
                     const toProcess = pendingItems.size > 0
                         ? [...pendingItems]
                         : [...document.querySelectorAll('.listitem')];
@@ -909,9 +1000,12 @@ body.ir-enabled.bt-toggles.bt-bullets .bt-caret {
 
         // =====================================================
         // Win 2: Scoped mutation observer — editor container only
+        // (editorContainer is declared near the top of onLoad so the
+        //  caret-class observer can share the same scope.)
         // =====================================================
 
-        const editorContainer = document.querySelector('.editor-wrapper, .page-content, #editor') || document.body;
+        // Track the active RAF id so unload can cancel it (S8).
+        let listColorRafId = 0;
 
         const listColorObserver = new MutationObserver((mutations) => {
             const affected = new Set();
@@ -1086,6 +1180,13 @@ body.ir-enabled.bt-toggles.bt-bullets .bt-caret {
             // before the insert (newly-created empty row case). After the
             // insert, offset 0 now points before our marker. Forward it.
             forwardCursorPastMarker(li);
+            // Retry on the next frame: Thymer sometimes re-anchors the
+            // selection back to listitem[0] after we forward it (post-Enter
+            // cursor placement runs on its own rAF). Retrying once after
+            // Thymer's pass settles catches that race. The cursorForwardBusy
+            // guard inside the helper prevents unnecessary work if the
+            // cursor has already moved somewhere valid.
+            requestAnimationFrame(() => forwardCursorPastMarker(li));
         };
 
         // Remove our marker and restore the marginLeft to the native child
@@ -1141,18 +1242,24 @@ body.ir-enabled.bt-toggles.bt-bullets .bt-caret {
                     }
                 }
             }
-            if (hasChild) li.classList.add('bt-has-children');
-            else li.classList.remove('bt-has-children');
+            // S4: skip no-op class changes to avoid unnecessary style
+            // invalidation.
+            const currently = li.classList.contains('bt-has-children');
+            if (hasChild && !currently) li.classList.add('bt-has-children');
+            else if (!hasChild && currently) li.classList.remove('bt-has-children');
         };
 
         // Find the `.listitem` that is the logical parent of `li` by walking
         // backwards in the flat DOM order until we find a `.listitem` with
         // strictly smaller indent. Used for the sync has-children path.
-        const findParentListItem = (li) => {
+        // S3: `allItems` (optional) lets a batch caller hand in a single
+        // pre-scanned NodeList/Array so we don't run
+        // document.querySelectorAll('.listitem') once per added row.
+        const findParentListItem = (li, allItems) => {
             if (!li) return null;
             const myIndent = getItemIndent(li);
             if (myIndent === 0) return null;
-            const all = document.querySelectorAll('.listitem');
+            const all = allItems || document.querySelectorAll('.listitem');
             let found = null;
             for (let i = 0; i < all.length; i++) {
                 if (all[i] === li) {
@@ -1181,12 +1288,19 @@ body.ir-enabled.bt-toggles.bt-bullets .bt-caret {
             }
             for (const li of items) injectMarker(li);
             // Flat-pass has-children: compare each row's indent to next row's.
+            // S4: cache the previous iteration's indent so we call
+            // getItemIndent once per row (instead of twice), and skip
+            // classList.add/remove when the state already matches.
+            let curIndent = items.length ? getItemIndent(items[0]) : 0;
             for (let i = 0; i < items.length; i++) {
                 const cur = items[i];
                 const next = items[i + 1];
-                const hasChild = next && getItemIndent(next) > getItemIndent(cur);
-                if (hasChild) cur.classList.add('bt-has-children');
-                else cur.classList.remove('bt-has-children');
+                const nextIndent = next ? getItemIndent(next) : -1;
+                const hasChild = !!next && nextIndent > curIndent;
+                const currently = cur.classList.contains('bt-has-children');
+                if (hasChild && !currently) cur.classList.add('bt-has-children');
+                else if (!hasChild && currently) cur.classList.remove('bt-has-children');
+                curIndent = nextIndent;
             }
             return items;
         };
@@ -1244,15 +1358,17 @@ body.ir-enabled.bt-toggles.bt-bullets .bt-caret {
         };
 
         let outlineRafPending = false;
+        let outlineRafId = 0;
         const runOutlinePass = () => {
             outlineRafPending = false;
+            if (this.isUnloaded) return;
             const items = annotateAll();
             applyCollapseState(items);
         };
         const scheduleOutlinePass = () => {
             if (outlineRafPending) return;
             outlineRafPending = true;
-            requestAnimationFrame(runOutlinePass);
+            outlineRafId = requestAnimationFrame(runOutlinePass);
         };
 
         // ---------- Synchronous observer path (native-feel) ----------
@@ -1329,11 +1445,16 @@ body.ir-enabled.bt-toggles.bt-bullets .bt-caret {
                 outlineMutating = true;
                 try {
                     for (const li of addedListItems) injectMarker(li);
+                    // S3: scan once for the whole batch instead of once per
+                    // added row inside findParentListItem.
+                    const allListItems = document.querySelectorAll('.listitem');
                     for (const li of addedListItems) {
-                        const parent = findParentListItem(li);
+                        const parent = findParentListItem(li, allListItems);
                         if (parent) updateHasChildrenFor(parent);
                         // Newly-added rows start with no children of their own.
-                        li.classList.remove('bt-has-children');
+                        if (li.classList.contains('bt-has-children')) {
+                            li.classList.remove('bt-has-children');
+                        }
                     }
                 } finally {
                     outlineMutating = false;
@@ -1363,10 +1484,22 @@ body.ir-enabled.bt-toggles.bt-bullets .bt-caret {
             attributeFilter: ['style']
         });
 
-        // Initial batch pass at load.
+        // Initial batch pass at load. The two delayed passes catch rows
+        // that Thymer inserts after our observer is attached but before
+        // the editor has fully populated. IDs captured so unload can
+        // cancel them (S5).
         scheduleOutlinePass();
-        setTimeout(scheduleOutlinePass, 250);
-        setTimeout(scheduleOutlinePass, 1000);
+        const outlineInitTimeout1 = setTimeout(scheduleOutlinePass, 250);
+        const outlineInitTimeout2 = setTimeout(scheduleOutlinePass, 1000);
+        this.cleanupMethods.push(() => {
+            clearTimeout(outlineInitTimeout1);
+            clearTimeout(outlineInitTimeout2);
+            // Cancel any pending RAFs so their callbacks don't fire
+            // post-unload (S8).
+            if (focusedItemRafId) cancelAnimationFrame(focusedItemRafId);
+            if (listColorRafId) cancelAnimationFrame(listColorRafId);
+            if (outlineRafId) cancelAnimationFrame(outlineRafId);
+        });
 
         this.cleanupMethods.push(() => outlineObserver.disconnect());
         this.cleanupMethods.push(() => {
@@ -1381,6 +1514,37 @@ body.ir-enabled.bt-toggles.bt-bullets .bt-caret {
             });
             document.body.classList.remove('bt-bullets', 'bt-toggles');
         });
+
+        // ----- link-menu drag-handle DOM reorder -----
+        // When Thymer injects a .link-menu hover popup, move .item-drag-handle
+        // to be the FIRST child so the drag circle renders on the left. We use
+        // a real reparent (not CSS `order`) because in some states Thymer's
+        // hit-zone appears to key off DOM order, producing a hotzone that sits
+        // between visible icons rather than on the circle.
+        const reorderLinkMenu = (linkMenu) => {
+            if (!linkMenu || !linkMenu.querySelector) return;
+            const handle = linkMenu.querySelector(':scope > .item-drag-handle');
+            if (!handle) return;
+            if (linkMenu.firstElementChild === handle) return;
+            linkMenu.insertBefore(handle, linkMenu.firstElementChild);
+        };
+        const linkMenuObserver = new MutationObserver((mutations) => {
+            if (this.isUnloaded) return;
+            for (const m of mutations) {
+                for (const node of m.addedNodes) {
+                    if (!(node instanceof Element)) continue;
+                    if (node.classList && node.classList.contains('link-menu')) {
+                        reorderLinkMenu(node);
+                    } else if (node.querySelectorAll) {
+                        node.querySelectorAll('.link-menu').forEach(reorderLinkMenu);
+                    }
+                }
+            }
+        });
+        linkMenuObserver.observe(outlineTarget, { childList: true, subtree: true });
+        // Reorder any .link-menu nodes already present at load.
+        outlineTarget.querySelectorAll('.link-menu').forEach(reorderLinkMenu);
+        this.cleanupMethods.push(() => linkMenuObserver.disconnect());
 
         // ---------- GUID resolution + zoom ----------
         // Resolve the GUID of a .listitem. Try data-guid attrs first, then
