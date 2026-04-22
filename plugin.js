@@ -450,8 +450,15 @@ body.ir-enabled .listitem.bt-zoom-start-line > .line-div {
         action handlers only fire when the link-menu is activated by
         a real drag-handle hover; clicks on a CSS-revealed options
         button are no-ops.) ---------- */
-body.ir-enabled.bt-toggles .link-menu .link-menu-action-collapse,
-body.ir-enabled.bt-toggles .link-menu .link-menu-action-expand {
+/* Hide native collapse/expand from the link-menu ONLY in caret-only
+   state (bt-toggles on, bt-bullets off). In that state the popup
+   reads [drag-handle][zoom] (54pt) and .bt-caret in the row handles
+   collapse. In both-on, we intentionally KEEP native collapse/expand
+   visible so the popup reads [drag-handle][toggle-caret] (54pt) per
+   user preference — the row still carries .bt-caret, so the popup
+   chevron is a secondary affordance while the popup is open. */
+body.ir-enabled.bt-toggles:not(.bt-bullets) .link-menu .link-menu-action-collapse,
+body.ir-enabled.bt-toggles:not(.bt-bullets) .link-menu .link-menu-action-expand {
     display: none !important;
 }
 
