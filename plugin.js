@@ -208,22 +208,37 @@ class Plugin extends AppPlugin {
             }
         };
 
+        // Clamp helper — defensive against malformed localStorage values
+        // (hand-edited, corrupted, or from older plugin versions). Without
+        // this, a bad persisted value could produce absurd line widths or
+        // out-of-range opacities until the user opens settings.
+        const clampNum = (n, lo, hi, fallback) => {
+            const v = Number(n);
+            if (!Number.isFinite(v)) return fallback;
+            if (v < lo) return lo;
+            if (v > hi) return hi;
+            return v;
+        };
+
         // Get saved scheme or default to rainbow
         let currentScheme = localStorage.getItem(STORAGE_KEY) || 'rainbow';
         if (!colorSchemes[currentScheme]) {
             currentScheme = 'rainbow';
         }
 
-        // Get saved settings or defaults
-        let savedWidth = parseInt(localStorage.getItem(WIDTH_KEY));
-        let currentWidth = isNaN(savedWidth) ? 1 : savedWidth;
-        
-        let savedActiveWidth = parseInt(localStorage.getItem(ACTIVE_WIDTH_KEY));
-        let activeWidth = isNaN(savedActiveWidth) ? 2 : savedActiveWidth;
-        
-        let currentOpacity = parseFloat(localStorage.getItem(OPACITY_KEY)) || 0.3;
+        // Get saved settings or defaults. Widths are integer 0..4 (matches
+        // the settings-panel slider range); opacity is 0..1.
+        let currentWidth = clampNum(
+            parseInt(localStorage.getItem(WIDTH_KEY), 10), 0, 4, 1);
+        let activeWidth = clampNum(
+            parseInt(localStorage.getItem(ACTIVE_WIDTH_KEY), 10), 0, 4, 2);
+        let currentOpacity = clampNum(
+            parseFloat(localStorage.getItem(OPACITY_KEY)), 0, 1, 0.3);
+
         let isEnabled = localStorage.getItem(ENABLED_KEY) !== 'false'; // default true
-        let threadingMode = localStorage.getItem(THREADING_MODE_KEY) || 'staircase'; // 'staircase' or 'stretched'
+        // Only two valid modes — guard against malformed values.
+        const savedThreadingMode = localStorage.getItem(THREADING_MODE_KEY);
+        let threadingMode = (savedThreadingMode === 'stretched') ? 'stretched' : 'staircase';
         let isBulletsEnabled = localStorage.getItem(BULLETS_ENABLED_KEY) !== 'false'; // default true
         let isTogglesEnabled = localStorage.getItem(TOGGLES_ENABLED_KEY) !== 'false'; // default true
 
@@ -1063,7 +1078,7 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
                     if (this.isUnloaded) return;
                     const toProcess = pendingItems.size > 0
                         ? [...pendingItems]
-                        : [...document.querySelectorAll('.listitem')];
+                        : [...editorContainer.querySelectorAll('.listitem')];
                     pendingItems.clear();
                     applyListColors(toProcess);
                 });
@@ -1080,6 +1095,7 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         let listColorRafId = 0;
 
         const listColorObserver = new MutationObserver((mutations) => {
+            if (this.isUnloaded) return;
             const affected = new Set();
             for (const m of mutations) {
                 if (m.type === 'childList') {
@@ -1347,8 +1363,11 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
 
         // Full-document annotation pass (RAF-debounced). Injects markers on
         // any rows missing one and recomputes bt-has-children for every row.
+        // Scoped to editorContainer to skip unrelated chrome (side panels,
+        // modals) — editorContainer falls back to document.body when the
+        // editor isn't found, so functional coverage is unchanged.
         const annotateAll = () => {
-            const items = Array.from(document.querySelectorAll('.listitem'));
+            const items = Array.from(editorContainer.querySelectorAll('.listitem'));
             if (!isEnabled || (!isBulletsEnabled && !isTogglesEnabled)) {
                 // Strip everything if disabled.
                 for (const li of items) {
@@ -1404,7 +1423,7 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         // forward until we hit a row at the same-or-lower indent, hiding
         // everything in between.
         const applyCollapseState = (items) => {
-            items = items || Array.from(document.querySelectorAll('.listitem'));
+            items = items || Array.from(editorContainer.querySelectorAll('.listitem'));
             // First pass: clear any row we previously hid + resync caret icons.
             for (const li of items) {
                 if (li.dataset.btHiddenByCollapse === '1') {
@@ -1462,6 +1481,7 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         };
 
         const outlineObserver = new MutationObserver((mutations) => {
+            if (this.isUnloaded) return;
             if (outlineMutating) return;
             if (!isEnabled || (!isBulletsEnabled && !isTogglesEnabled)) return;
 
@@ -1518,8 +1538,9 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
                 try {
                     for (const li of addedListItems) injectMarker(li);
                     // S3: scan once for the whole batch instead of once per
-                    // added row inside findParentListItem.
-                    const allListItems = document.querySelectorAll('.listitem');
+                    // added row inside findParentListItem. Scoped to the
+                    // editor container to avoid walking side panels.
+                    const allListItems = editorContainer.querySelectorAll('.listitem');
                     for (const li of addedListItems) {
                         const parent = findParentListItem(li, allListItems);
                         if (parent) updateHasChildrenFor(parent);
@@ -2147,12 +2168,29 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         });
 
         const updateSettings = (newSettings) => {
-            if (newSettings.currentScheme !== undefined) currentScheme = newSettings.currentScheme;
-            if (newSettings.currentWidth !== undefined) currentWidth = parseInt(newSettings.currentWidth);
-            if (newSettings.activeWidth !== undefined) activeWidth = parseInt(newSettings.activeWidth);
-            if (newSettings.currentOpacity !== undefined) currentOpacity = parseFloat(newSettings.currentOpacity);
-            if (newSettings.isEnabled !== undefined) isEnabled = newSettings.isEnabled;
-            if (newSettings.threadingMode !== undefined) threadingMode = newSettings.threadingMode;
+            // Mirror the same validation we apply when reading from
+            // localStorage so a bogus value sent from the settings panel
+            // (or a future external caller) can't put the plugin into an
+            // invalid state.
+            if (newSettings.currentScheme !== undefined
+                && colorSchemes[newSettings.currentScheme]) {
+                currentScheme = newSettings.currentScheme;
+            }
+            if (newSettings.currentWidth !== undefined) {
+                currentWidth = clampNum(parseInt(newSettings.currentWidth, 10), 0, 4, currentWidth);
+            }
+            if (newSettings.activeWidth !== undefined) {
+                activeWidth = clampNum(parseInt(newSettings.activeWidth, 10), 0, 4, activeWidth);
+            }
+            if (newSettings.currentOpacity !== undefined) {
+                currentOpacity = clampNum(parseFloat(newSettings.currentOpacity), 0, 1, currentOpacity);
+            }
+            if (newSettings.isEnabled !== undefined) isEnabled = !!newSettings.isEnabled;
+            if (newSettings.threadingMode !== undefined
+                && (newSettings.threadingMode === 'staircase'
+                    || newSettings.threadingMode === 'stretched')) {
+                threadingMode = newSettings.threadingMode;
+            }
             if (newSettings.isBulletsEnabled !== undefined) isBulletsEnabled = !!newSettings.isBulletsEnabled;
             if (newSettings.isTogglesEnabled !== undefined) isTogglesEnabled = !!newSettings.isTogglesEnabled;
             if (newSettings.currentScheme !== undefined) applySchemeVars(currentScheme);
