@@ -497,13 +497,51 @@ body.ir-enabled .bt-bullet:active::after {
     transform: scale(1.1);
 }
 
-/* Parent rows get a hollow bullet (ring) when carets are NOT shown, so the
-   user can still visually tell the row has children. When carets ARE shown
-   (bt-toggles), keep the solid bullet since the caret carries the signal. */
-body.ir-enabled.bt-bullets:not(.bt-toggles) .listitem.bt-has-children > .bt-marker > .bt-bullet::after {
+/* Differentiate collapsable rows: parents get a Workflowy-style
+   ring-with-inner-dot, leaves keep the plain solid dot. Applies whenever
+   bullets are enabled, regardless of carets — the ring gives a quick
+   visual cue that the row has children even when carets aren't the
+   primary affordance. The inner dot is drawn with an inset box-shadow
+   so we don't need a second pseudo-element. */
+body.ir-enabled.bt-bullets .listitem.bt-has-children > .bt-marker > .bt-bullet::after {
     background: transparent;
     border: 1.5px solid rgba(128, 128, 128, 0.65);
+    box-shadow: inset 0 0 0 2.5px currentColor;
     opacity: 0.75;
+}
+body.ir-enabled.bt-bullets .listitem.bt-has-children > .bt-marker > .bt-bullet:hover::after {
+    box-shadow: inset 0 0 0 2.5px currentColor;
+}
+
+/* Collapsed parents: add an outer halo behind the bullet so it's obvious
+   content is hidden. Combines with the inset inner-dot from the parent
+   rule above (comma-separated box-shadows stack). Slightly bumps
+   opacity so a collapsed row reads as "active / has hidden state"
+   rather than dimmed. */
+body.ir-enabled.bt-bullets .listitem.bt-has-children.bt-collapsed > .bt-marker > .bt-bullet::after {
+    box-shadow:
+        inset 0 0 0 2.5px currentColor,
+        0 0 0 3px rgba(128, 128, 128, 0.22);
+    opacity: 0.95;
+}
+body.ir-enabled.bt-bullets .listitem.bt-has-children.bt-collapsed > .bt-marker > .bt-bullet:hover::after {
+    box-shadow:
+        inset 0 0 0 2.5px currentColor,
+        0 0 0 4px rgba(128, 128, 128, 0.32);
+}
+
+@media (prefers-color-scheme: dark) {
+    body.ir-enabled.bt-bullets .listitem.bt-has-children.bt-collapsed > .bt-marker > .bt-bullet::after {
+        box-shadow:
+            inset 0 0 0 2.5px currentColor,
+            0 0 0 3px rgba(200, 200, 200, 0.22);
+    }
+}
+body.ir-enabled.dark.bt-bullets .listitem.bt-has-children.bt-collapsed > .bt-marker > .bt-bullet::after,
+body.ir-enabled[data-theme="dark"].bt-bullets .listitem.bt-has-children.bt-collapsed > .bt-marker > .bt-bullet::after {
+    box-shadow:
+        inset 0 0 0 2.5px currentColor,
+        0 0 0 3px rgba(200, 200, 200, 0.22);
 }
 
 @media (prefers-color-scheme: dark) {
