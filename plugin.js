@@ -20,6 +20,78 @@ class Plugin extends AppPlugin {
         this.cleanupMethods = [];
         this.styleElement = null;
 
+        // =====================================================
+        // Thymer-DOM contract (single source of truth).
+        // -----------------------------------------------------
+        // Every class/id below belongs to Thymer's own DOM, not
+        // ours. They are referenced throughout this plugin by
+        // literal string in querySelector/classList calls and in
+        // CSS rules. If Thymer renames any of them, search for
+        // the literal here and grep the file for the same string.
+        // This block is documentation only — changing a value
+        // here does NOT propagate to the selectors below; it's
+        // kept as a reference so a future developer has one place
+        // to learn which class names are part of the Thymer
+        // integration contract.
+        //
+        //   .listitem              each outline row (li analogue).
+        //   .listitem-text         plain text row.
+        //   .listitem-task         task (checkbox) row.
+        //   .listitem-ulist        unordered-list row.
+        //   .listitem-olist        ordered-list (numbered) row.
+        //   .listitem-with-caret   row that currently owns the
+        //                          Thymer caret (cursor). Only
+        //                          one such row at a time; watched
+        //                          via MutationObserver to drive
+        //                          active-threading highlight.
+        //   .listitem-indentline   the vertical indent guide at
+        //                          the left edge of every row.
+        //                          We paint these with the rainbow
+        //                          colours.
+        //
+        //   .line-div              the text-bearing inner div of
+        //                          a listitem. Holds the editable
+        //                          content (and .listitem-indentline
+        //                          as a child).
+        //   .line-bullet-div       native ulist bullet column;
+        //                          hidden when bt-bullets is on.
+        //   .line-check-div        native task checkbox column.
+        //   .line-number-div       native olist number column.
+        //
+        //   .link-menu             hover popup anchored to a row;
+        //                          contains .item-drag-handle and
+        //                          native zoom / collapse buttons.
+        //   .item-drag-handle      the floating circle we restyle
+        //                          as the drag/options affordance.
+        //   .handle-fold-icon      Thymer's inner SVG inside
+        //                          .item-drag-handle (we hide it
+        //                          and replace with a dots glyph).
+        //   .link-menu-action-collapse, .link-menu-action-expand,
+        //   .link-menu-action-zoom
+        //                          native action buttons in the
+        //                          link-menu; we hide them when
+        //                          our in-row caret/bullet is
+        //                          providing the same affordance.
+        //
+        //   #virtualinput-wrapper  Thymer's hidden input element
+        //                          that actually receives all
+        //                          keystrokes. DOM caret lives
+        //                          here, NOT in the visible
+        //                          editor — so contenteditable
+        //                          cursor manipulation does not
+        //                          affect user-visible typing.
+        //   .editor-wrapper,
+        //   .page-content,
+        //   #editor                fallback scopes used to find
+        //                          the editor container.
+        //
+        //   .bt-marker, .bt-caret, .bt-bullet, .bt-has-children,
+        //   .bt-active-highlight
+        //                          OUR injected classes (prefix
+        //                          `bt-`). Safe to rename if we
+        //                          update all call sites.
+        // =====================================================
+
         // Storage keys for persisting settings
         const STORAGE_KEY = 'indent-rainbow-scheme';
         const WIDTH_KEY = 'indent-rainbow-width';
