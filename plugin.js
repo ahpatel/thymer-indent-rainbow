@@ -308,26 +308,41 @@ body.ir-enabled .listitem-olist .listitem-indentline {
 /* Global horizontal nudge (~1pt) so guides sit centered under bullets/numbers/
    checkboxes. Applied uniformly across all item types (including headings,
    which lack the listitem-text/task/ulist/olist classes) so per-level
-   spacing stays uniform. Tweak --ir-align-nudge to fine-tune. */
+   spacing stays uniform. Tweak --ir-align-nudge to fine-tune.
+
+   --ir-bullet-shift is a second, mode-dependent nudge that's 0 by default
+   and becomes a negative value when bt-bullets is on, so the rainbow guide
+   (and any downstream active-thread arm, which derives from the indent
+   line's bounding rect) shifts left to sit directly under the bullet
+   instead of under the caret/chevron. */
 :root {
     --ir-align-nudge: 1.5px;
+    --ir-bullet-shift: 0px;
+}
+
+/* When Workflowy bullets are enabled, move every rainbow guide left so it
+   tracks the bullet's x-position rather than the caret's. 20px matches the
+   caret-to-bullet distance in .bt-marker (caret 18px + 2px gap, with both
+   elements centered within their column). */
+body.ir-enabled.bt-bullets {
+    --ir-bullet-shift: -10px;
 }
 
 /* Base: nudge applies to every indent line (catches headings + text + task). */
 body.ir-enabled .listitem-indentline {
-    transform: translateX(calc(-2px + var(--ir-align-nudge))) !important;
+    transform: translateX(calc(-2px + var(--ir-align-nudge) + var(--ir-bullet-shift))) !important;
 }
 
 /* Align bullet indent line with text/heading guides, then apply the global
    nudge. Bullet items sit 6.75px left of text items of the same level. */
 body.ir-enabled .listitem-ulist .listitem-indentline {
-    transform: translateX(calc(5px + var(--ir-align-nudge))) !important;
+    transform: translateX(calc(5px + var(--ir-align-nudge) + var(--ir-bullet-shift))) !important;
 }
 
 /* Align numbered-list indent line with text/heading guides, then apply the
    global nudge. Numbered items sit 2.63px right of text items of same level. */
 body.ir-enabled .listitem-olist .listitem-indentline {
-    transform: translateX(calc(-3.5px + var(--ir-align-nudge))) !important;
+    transform: translateX(calc(-3.5px + var(--ir-align-nudge) + var(--ir-bullet-shift))) !important;
 }
 
 /* Ensure indent lines are visible for all item types */
@@ -415,13 +430,31 @@ body.ir-enabled .bt-marker {
     user-select: none;
     flex-shrink: 0;
     position: relative;
-    z-index: 2;
+    /* Sit above .bt-active-highlight (z-index: 10) so the caret/bullet
+       aren't hidden behind the active-thread arm when the guide crosses
+       directly under the marker. */
+    z-index: 11;
 }
 
 /* Show the marker wrapper whenever either feature is enabled. */
 body.ir-enabled.bt-bullets .bt-marker,
 body.ir-enabled.bt-toggles .bt-marker {
     display: inline-flex;
+}
+
+/* Knockout disc behind the caret and bullet so the rainbow active-thread
+   arm visually passes BEHIND the marker and resumes on the other side,
+   instead of cutting through the chevron glyph or parent-bullet ring.
+   Pulls the page background via a fallback chain so it tracks theme. */
+body.ir-enabled {
+    --ir-marker-knockout-bg: var(--theme-background-primary,
+        var(--color-bg-800, var(--editor-bg, #111)));
+}
+
+body.ir-enabled.bt-toggles .bt-marker > .bt-caret,
+body.ir-enabled.bt-bullets .bt-marker > .bt-bullet {
+    background-color: var(--ir-marker-knockout-bg);
+    border-radius: 50%;
 }
 
 /* ---------- Caret (disclosure chevron) ---------- */
@@ -510,9 +543,12 @@ body.ir-enabled.ir-bullets-always .bt-bullet {
     --bt-bullet-fill: var(--bt-bullet-color, currentColor);
 }
 
-/* Rainbow-on-hover mode: bullet stays uniform at rest, takes the level color
-   on hover. The var lives on .bt-bullet so it cascades into ::after. */
-body.ir-enabled.ir-bullets-hover .bt-bullet:hover {
+/* Rainbow-on-hover mode: bullet stays uniform at rest, takes the level
+   color whenever the mouse is anywhere on the row OR the cursor is on
+   the row (.bt-focused). Scoped to the row's own bullet via the direct
+   descendant marker so hovering a parent doesn't tint its children. */
+body.ir-enabled.ir-bullets-hover .listitem:hover > .bt-marker > .bt-bullet,
+body.ir-enabled.ir-bullets-hover .listitem.bt-focused > .bt-marker > .bt-bullet {
     --bt-bullet-fill: var(--bt-bullet-color, currentColor);
 }
 
