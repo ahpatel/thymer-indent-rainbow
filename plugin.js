@@ -109,12 +109,12 @@ class Plugin extends AppPlugin {
                 name: 'Rainbow',
                 colors: [
                     '#ff5f5f',  // Red
-                    '#ffbd2e',  // Orange
-                    '#feca57',  // Yellow
-                    '#28c940',  // Green
-                    '#00d0ff',  // Blue
+                    '#ed8e09',  // Orange
+                    '#ffda46',  // Yellow
+                    '#19a62e',  // Green
+                    '#0080ff',  // Blue
                     '#5856d6',  // Indigo
-                    '#ff2d55',  // Pink
+                    '#f6647f',  // Pink
                     '#af52de',  // Purple
                 ]
             },
