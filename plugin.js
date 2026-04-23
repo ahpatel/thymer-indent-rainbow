@@ -101,6 +101,7 @@ class Plugin extends AppPlugin {
         const THREADING_MODE_KEY = 'indent-rainbow-threading-mode';
         const BULLETS_ENABLED_KEY = 'indent-rainbow-bullets-enabled';
         const TOGGLES_ENABLED_KEY = 'indent-rainbow-toggles-enabled';
+        const BULLET_COLOR_MODE_KEY = 'indent-rainbow-bullet-color-mode';
 
         // Color schemes for different tastes
         const colorSchemes = {
@@ -241,6 +242,15 @@ class Plugin extends AppPlugin {
         let threadingMode = (savedThreadingMode === 'stretched') ? 'stretched' : 'staircase';
         let isBulletsEnabled = localStorage.getItem(BULLETS_ENABLED_KEY) !== 'false'; // default true
         let isTogglesEnabled = localStorage.getItem(TOGGLES_ENABLED_KEY) !== 'false'; // default true
+        // Tri-state bullet color mode — 'neutral' | 'hover' | 'always'.
+        // Default 'always' so new installs see rainbow-colored bullets; existing
+        // users with nothing persisted get the same default on first load.
+        const savedBulletColorMode = localStorage.getItem(BULLET_COLOR_MODE_KEY);
+        let bulletColorMode = (savedBulletColorMode === 'neutral'
+            || savedBulletColorMode === 'hover'
+            || savedBulletColorMode === 'always')
+            ? savedBulletColorMode
+            : 'always';
 
         // Opacity presets
         const opacityPresets = {
@@ -471,6 +481,15 @@ body.ir-enabled.bt-bullets .bt-marker > .bt-bullet {
     display: inline-flex;
 }
 
+/* --bt-bullet-fill is the effective color used for the bullet's solid dot,
+   the parent inner-dot, and the collapsed halo. Defaults to currentColor so
+   Neutral mode renders exactly like the original design; mode-gated rules
+   below swap it for var(--bt-bullet-color) (the row's level color, written
+   per-listitem by colorIndentLine). */
+body.ir-enabled .bt-bullet {
+    --bt-bullet-fill: currentColor;
+}
+
 body.ir-enabled .bt-bullet::after {
     content: '';
     display: block;
@@ -479,11 +498,22 @@ body.ir-enabled .bt-bullet::after {
     height: 8px;
     border-radius: 50%;
     border: 1px solid rgba(128, 128, 128, 0.55);
-    background: currentColor;
+    background: var(--bt-bullet-fill);
     background-clip: padding-box;
     opacity: 0.45;
     transition: opacity 0.15s ease, transform 0.15s ease,
                 box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+/* Rainbow-always mode: bullet fill always uses the row's indent-level color. */
+body.ir-enabled.ir-bullets-always .bt-bullet {
+    --bt-bullet-fill: var(--bt-bullet-color, currentColor);
+}
+
+/* Rainbow-on-hover mode: bullet stays uniform at rest, takes the level color
+   on hover. The var lives on .bt-bullet so it cascades into ::after. */
+body.ir-enabled.ir-bullets-hover .bt-bullet:hover {
+    --bt-bullet-fill: var(--bt-bullet-color, currentColor);
 }
 
 body.ir-enabled .bt-bullet:hover::after {
@@ -506,42 +536,31 @@ body.ir-enabled .bt-bullet:active::after {
 body.ir-enabled.bt-bullets .listitem.bt-has-children > .bt-marker > .bt-bullet::after {
     background: transparent;
     border: 1.5px solid rgba(128, 128, 128, 0.65);
-    box-shadow: inset 0 0 0 2.5px currentColor;
+    box-shadow: inset 0 0 0 2.5px var(--bt-bullet-fill);
     opacity: 0.75;
 }
 body.ir-enabled.bt-bullets .listitem.bt-has-children > .bt-marker > .bt-bullet:hover::after {
-    box-shadow: inset 0 0 0 2.5px currentColor;
+    box-shadow: inset 0 0 0 2.5px var(--bt-bullet-fill);
 }
 
 /* Collapsed parents: add an outer halo behind the bullet so it's obvious
    content is hidden. Combines with the inset inner-dot from the parent
-   rule above (comma-separated box-shadows stack). Slightly bumps
+   rule above (comma-separated box-shadows stack). The halo is derived
+   from --bt-bullet-fill via color-mix so it tracks the bullet's color
+   in all modes: in Neutral it's a text-toned wash, in Hover/Always it
+   naturally tints toward the row's indent-level color. Slightly bumps
    opacity so a collapsed row reads as "active / has hidden state"
    rather than dimmed. */
 body.ir-enabled.bt-bullets .listitem.bt-has-children.bt-collapsed > .bt-marker > .bt-bullet::after {
     box-shadow:
-        inset 0 0 0 2.5px currentColor,
-        0 0 0 3px rgba(128, 128, 128, 0.22);
+        inset 0 0 0 2.5px var(--bt-bullet-fill),
+        0 0 0 3px color-mix(in srgb, var(--bt-bullet-fill) 35%, transparent);
     opacity: 0.95;
 }
 body.ir-enabled.bt-bullets .listitem.bt-has-children.bt-collapsed > .bt-marker > .bt-bullet:hover::after {
     box-shadow:
-        inset 0 0 0 2.5px currentColor,
-        0 0 0 4px rgba(128, 128, 128, 0.32);
-}
-
-@media (prefers-color-scheme: dark) {
-    body.ir-enabled.bt-bullets .listitem.bt-has-children.bt-collapsed > .bt-marker > .bt-bullet::after {
-        box-shadow:
-            inset 0 0 0 2.5px currentColor,
-            0 0 0 3px rgba(200, 200, 200, 0.22);
-    }
-}
-body.ir-enabled.dark.bt-bullets .listitem.bt-has-children.bt-collapsed > .bt-marker > .bt-bullet::after,
-body.ir-enabled[data-theme="dark"].bt-bullets .listitem.bt-has-children.bt-collapsed > .bt-marker > .bt-bullet::after {
-    box-shadow:
-        inset 0 0 0 2.5px currentColor,
-        0 0 0 3px rgba(200, 200, 200, 0.22);
+        inset 0 0 0 2.5px var(--bt-bullet-fill),
+        0 0 0 4px color-mix(in srgb, var(--bt-bullet-fill) 50%, transparent);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -771,13 +790,19 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             localStorage.setItem(THREADING_MODE_KEY, threadingMode);
             localStorage.setItem(BULLETS_ENABLED_KEY, isBulletsEnabled);
             localStorage.setItem(TOGGLES_ENABLED_KEY, isTogglesEnabled);
+            localStorage.setItem(BULLET_COLOR_MODE_KEY, bulletColorMode);
         };
 
         // Toggle the ir-enabled body class which gates all our CSS rules.
+        // Also sets exactly one of ir-bullets-neutral / -hover / -always so
+        // the CSS can pick the right --bt-bullet-fill override.
         const applyEnabledState = () => {
             document.body.classList.toggle('ir-enabled', isEnabled);
             document.body.classList.toggle('bt-bullets', isEnabled && isBulletsEnabled);
             document.body.classList.toggle('bt-toggles', isEnabled && isTogglesEnabled);
+            document.body.classList.toggle('ir-bullets-neutral', bulletColorMode === 'neutral');
+            document.body.classList.toggle('ir-bullets-hover', bulletColorMode === 'hover');
+            document.body.classList.toggle('ir-bullets-always', bulletColorMode === 'always');
         };
 
         // Inject the static stylesheet once.
@@ -1085,8 +1110,13 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             }
 
             const level = Math.max(0, Math.floor(marginLeft / INDENT_STEP));
-            indentLine.style.setProperty('--ir-color', `var(--ir-level-${level})`, 'important');
+            const levelVar = `var(--ir-level-${level})`;
+            indentLine.style.setProperty('--ir-color', levelVar, 'important');
             indentLine.dataset.btManaged = '1';
+            // Mirror the level color onto the .listitem so the bullet (which is
+            // not a descendant of .listitem-indentline) can inherit it via
+            // --bt-bullet-color. Cheap, piggybacks on this existing pass.
+            item.style.setProperty('--bt-bullet-color', levelVar);
         };
 
         const clearListColors = () => {
@@ -1096,6 +1126,13 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
                 line.style.removeProperty('display');
                 delete line.dataset.btManaged;
                 delete line.dataset.btEmpty;
+            }
+            // Also clear the bullet-color var from any listitems we wrote it onto.
+            const items = document.querySelectorAll('.listitem');
+            for (const it of items) {
+                if (it.style && it.style.getPropertyValue('--bt-bullet-color')) {
+                    it.style.removeProperty('--bt-bullet-color');
+                }
             }
         };
 
@@ -2231,6 +2268,12 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             }
             if (newSettings.isBulletsEnabled !== undefined) isBulletsEnabled = !!newSettings.isBulletsEnabled;
             if (newSettings.isTogglesEnabled !== undefined) isTogglesEnabled = !!newSettings.isTogglesEnabled;
+            if (newSettings.bulletColorMode !== undefined
+                && (newSettings.bulletColorMode === 'neutral'
+                    || newSettings.bulletColorMode === 'hover'
+                    || newSettings.bulletColorMode === 'always')) {
+                bulletColorMode = newSettings.bulletColorMode;
+            }
             if (newSettings.currentScheme !== undefined) applySchemeVars(currentScheme);
             applySettingVars();
             applyEnabledState();
@@ -2267,7 +2310,8 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
                 colorSchemes, opacityPresets,
                 getSettings: () => ({
                     currentScheme, currentWidth, activeWidth, currentOpacity,
-                    isEnabled, threadingMode, isBulletsEnabled, isTogglesEnabled
+                    isEnabled, threadingMode, isBulletsEnabled, isTogglesEnabled,
+                    bulletColorMode
                 }),
                 updateSettings,
                 createIcon: (name) => this.ui.createIcon(name)
@@ -2923,6 +2967,36 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             'Workflowy Bullets',
             'Click a bullet to zoom into that row. Headings, text, and list items all get bullets.',
             bulletsCheckbox
+        ));
+
+        // Bullet Color mode (tri-state): neutral / hover / always.
+        const bulletColorSelect = document.createElement('select');
+        bulletColorSelect.className = 'ir-input cursor-pointer';
+        const bulletColorOptions = [
+            { value: 'neutral', label: 'Neutral (uniform gray)' },
+            { value: 'hover',   label: 'Rainbow on hover' },
+            { value: 'always',  label: 'Rainbow always' },
+        ];
+        const currentBulletColorMode = (currentSettings.bulletColorMode === 'neutral'
+            || currentSettings.bulletColorMode === 'hover'
+            || currentSettings.bulletColorMode === 'always')
+            ? currentSettings.bulletColorMode
+            : 'always';
+        for (const o of bulletColorOptions) {
+            const opt = document.createElement('option');
+            opt.value = o.value;
+            opt.textContent = o.label;
+            opt.selected = currentBulletColorMode === o.value;
+            bulletColorSelect.appendChild(opt);
+        }
+        bulletColorSelect.addEventListener('change', (e) => {
+            currentSettings.bulletColorMode = e.target.value;
+            api.updateSettings({ bulletColorMode: e.target.value });
+        });
+        outlineCard.appendChild(createField(
+            'Bullet Color',
+            'How the row bullet picks up your indent rainbow palette.',
+            bulletColorSelect
         ));
 
         const togglesCheckbox = document.createElement('input');
