@@ -1776,22 +1776,34 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
                     if (b) { menu = m; btn = b; break; }
                 }
                 if (!menu) return false;
-                // Thymer's click handler appears to gate on visibility:
-                //   - menu must have `.link-menu-visible`
-                //   - body must have `.editor-drag-handle-open`
-                //   - menu's `data-guid` is the row anchor
-                // When our chevron click fires without an active hover,
-                // the menu is in its hidden state and the action is a
-                // no-op. Temporarily simulate the "open" state around
-                // the button click, then restore so we don't leave the
-                // menu visibly orphaned if Thymer doesn't clean up.
+                // Thymer's click handler appears to gate on four pieces
+                // of anchor state:
+                //   - `.link-menu-visible` class on the menu
+                //   - `.editor-drag-handle-open` class on body
+                //   - `data-guid` on the menu (the row guid)
+                //   - CSS `top`/`left` positioning the menu over the
+                //     target row (used as a secondary anchor / for
+                //     resolving the row when data-guid is stale)
+                // When our chevron click fires on a row Thymer hasn't
+                // actively hovered, the menu is hidden AND still
+                // positioned over a previously-hovered row. Override
+                // all four around the button click, then restore so we
+                // don't leave the menu visibly orphaned.
                 const ourGuid = li.getAttribute('data-guid') || '';
                 const prevGuid = menu.getAttribute('data-guid');
                 const menuWasVisible = menu.classList.contains('link-menu-visible');
                 const bodyWasOpen = document.body.classList.contains('editor-drag-handle-open');
+                const prevTop = menu.style.top;
+                const prevLeft = menu.style.left;
                 if (ourGuid && prevGuid !== ourGuid) menu.setAttribute('data-guid', ourGuid);
                 if (!menuWasVisible) menu.classList.add('link-menu-visible');
                 if (!bodyWasOpen) document.body.classList.add('editor-drag-handle-open');
+                // Position the menu over our target row so any
+                // position-based anchor resolution in Thymer's click
+                // handler picks the right row.
+                const liRect = li.getBoundingClientRect();
+                menu.style.setProperty('top', `${liRect.top + liRect.height / 2}px`, 'important');
+                menu.style.setProperty('left', `${liRect.right - 80}px`, 'important');
                 const prevD = btn.style.display;
                 const prevV = btn.style.visibility;
                 btn.style.setProperty('display', 'flex', 'important');
@@ -1804,6 +1816,8 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
                 if (!menuWasVisible) menu.classList.remove('link-menu-visible');
                 if (!bodyWasOpen) document.body.classList.remove('editor-drag-handle-open');
                 if (ourGuid && prevGuid && prevGuid !== ourGuid) menu.setAttribute('data-guid', prevGuid);
+                if (prevTop) menu.style.top = prevTop; else menu.style.removeProperty('top');
+                if (prevLeft) menu.style.left = prevLeft; else menu.style.removeProperty('left');
                 return true;
             };
 
