@@ -1023,23 +1023,26 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
                             const pIndent = p.querySelector('.listitem-indentline');
                             const pLine = pIndent ? pIndent.parentElement : null;
 
+                            // Compute the horizontal target edge (where the
+                            // arm should terminate). Shared between the
+                            // normal and fallback paths below.
+                            let armEndX = tRect.left - 5;
+                            for (let ci = 0; ci < targetPointNode.children.length; ci++) {
+                                const ch = targetPointNode.children[ci];
+                                if (ch.style && ch.style.marginLeft && parseInt(ch.style.marginLeft) > 0) {
+                                    armEndX = ch.getBoundingClientRect().left;
+                                    break;
+                                }
+                            }
+
                             if (pLine && pIndent && pIndent.parentElement) {
                                 const pRect = pIndent.getBoundingClientRect();
                                 const pContainerRect = pIndent.parentElement.getBoundingClientRect();
 
                                 const h = tY - pRect.top;
-
-                                let armEndX = tRect.left - 5;
-                                for (let ci = 0; ci < targetPointNode.children.length; ci++) {
-                                    const ch = targetPointNode.children[ci];
-                                    if (ch.style && ch.style.marginLeft && parseInt(ch.style.marginLeft) > 0) {
-                                        armEndX = ch.getBoundingClientRect().left;
-                                        break;
-                                    }
-                                }
                                 const w = Math.max(14, armEndX - pRect.left);
 
-                                if (h > 0 && pRect.height > 0) {
+                                if (h > 0) {
                                     highlightData.push({
                                         parent: pIndent.parentElement,
                                         top: (pRect.top - pContainerRect.top),
@@ -1048,6 +1051,82 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
                                         height: h,
                                         color: getComputedStyle(pIndent).backgroundColor
                                     });
+                                }
+                            } else {
+                                // Fallback: Thymer removes the parent's
+                                // .listitem-indentline entirely when the
+                                // only visible descendant is a collapsed
+                                // row (it has nothing to stretch the guide
+                                // against). In that state the arm would
+                                // simply not render, leaving the focused
+                                // collapsed child disconnected from its
+                                // parent's thread. Synthesize the arm
+                                // geometry from the parent's marker and
+                                // copy the indent-line X from any sibling
+                                // at the same indent level.
+                                let pLevel = 0;
+                                for (let i = 0; i < p.children.length; i++) {
+                                    const ch = p.children[i];
+                                    if (ch.style && ch.style.marginLeft) {
+                                        pLevel = Math.floor((parseInt(ch.style.marginLeft) || 0) / INDENT_STEP);
+                                        break;
+                                    }
+                                }
+
+                                // Find a donor indent-line at the same
+                                // level to reuse its X offset. The guide
+                                // X is driven by Thymer's layout, so we
+                                // can't hard-code it.
+                                let donorLeft = null;
+                                const donors = document.querySelectorAll('.listitem-indentline');
+                                for (const d of donors) {
+                                    if (!d.offsetParent) continue;
+                                    const dItem = d.closest('.listitem');
+                                    if (!dItem || dItem === p) continue;
+                                    let dLevel = 0;
+                                    for (let i = 0; i < dItem.children.length; i++) {
+                                        const ch = dItem.children[i];
+                                        if (ch.style && ch.style.marginLeft) {
+                                            dLevel = Math.floor((parseInt(ch.style.marginLeft) || 0) / INDENT_STEP);
+                                            break;
+                                        }
+                                    }
+                                    if (dLevel !== pLevel) continue;
+                                    const dr = d.getBoundingClientRect();
+                                    if (dr.height > 0) { donorLeft = dr.left; break; }
+                                }
+
+                                const pMarker = p.querySelector(':scope > .bt-marker');
+                                // Use the parent row's .line-div as the
+                                // positioned container — the listitem
+                                // itself is position: static, so absolute
+                                // children on it resolve against a distant
+                                // ancestor and render at the wrong Y.
+                                const pContainer = p.querySelector('.line-div') || p;
+                                if (donorLeft !== null && pMarker) {
+                                    const mRect = pMarker.getBoundingClientRect();
+                                    const armTopY = mRect.top + (mRect.height / 2);
+                                    const h = tY - armTopY;
+                                    if (h > 0) {
+                                        const pContainerRect = pContainer.getBoundingClientRect();
+                                        // Resolve CSS var once so the
+                                        // drop-shadow filter (which doesn't
+                                        // always accept var() reliably in
+                                        // inline styles) gets a concrete
+                                        // color.
+                                        const color = (getComputedStyle(document.documentElement)
+                                            .getPropertyValue(`--ir-level-${pLevel}`) || '').trim()
+                                            || `var(--ir-level-${pLevel})`;
+                                        const w = Math.max(14, armEndX - donorLeft);
+                                        highlightData.push({
+                                            parent: pContainer,
+                                            top: (armTopY - pContainerRect.top),
+                                            left: (donorLeft - pContainerRect.left),
+                                            width: w,
+                                            height: h,
+                                            color: color
+                                        });
+                                    }
                                 }
                             }
                         }
