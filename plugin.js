@@ -464,7 +464,7 @@ body.ir-enabled .bt-caret {
     width: 18px;
     height: 18px;
     align-items: center;
-    justify-content: left;
+    justify-content: center;   /* center glyph inside the knockout disc */
     font-size: 14px;           /* Tabler chevrons read better a bit bigger */
     line-height: 1;
     color: currentColor;
@@ -473,11 +473,10 @@ body.ir-enabled .bt-caret {
     transition: opacity 0.12s ease, transform 0.12s ease;
     flex-shrink: 0;
     transform-origin: center;
-    /* 1px visual nudge so the chevron's center lines up with the
-       rainbow indent guide that sits at the row's margin-left. Uses
-       transform (not margin) so sibling layout (.bt-bullet column) is
-       unaffected. */
-    transform: translateX(1px);
+    /* translateX(1px) removed — was aligning chevron with the guide when
+       the guide ran down the caret column. Since v1.4.8 the guide sits
+       under the bullet (--ir-bullet-shift: -10px), so the extra nudge
+       only offset the chevron from its own knockout disc. */
 }
 
 /* Reserve space for the caret on every row (visible or not) so bullets
