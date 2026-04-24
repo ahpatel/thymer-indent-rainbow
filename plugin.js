@@ -2826,6 +2826,8 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         let forwardedBtn = null;
         let forwardedSrc = null;
         const enterForward = (btn, src) => {
+            // TEMP diagnostic — remove once tooltips confirmed working.
+            try { console.log('[ir-tip] enterForward btn=', btn, 'src=', src); } catch (_) {}
             if (!btn) return;
             if (btn === forwardedBtn && src === forwardedSrc) return;
             if (forwardedBtn) dispatchHoverOn(forwardedBtn, false, forwardedSrc);
