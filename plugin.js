@@ -1075,14 +1075,34 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
 /* ---------- Hide markers on blank lines ----------
    When body.ir-hide-empty-markers is active, any .listitem tagged
    with .bt-empty (written by colorIndentLine when the row's text
-   content is blank) hides its bullet and fold caret. visibility:
-   hidden (not display: none) keeps the marker slot occupied so
-   layout doesn't jump the moment the user types the first
-   character. The hover frame is unaffected — on blank rows users
-   can still see the drag/fold affordance on hover. */
+   content is blank) fades out its bullet and fold caret. We use
+   opacity (not display/visibility) so the marker slot stays
+   occupied — layout doesn't jump the moment the user types the
+   first character — and so we can animate the transition.
+
+   Fade behavior: slow fade-out (1.5s) once the row loses both
+   hover and focus, fast fade-in (0.15s) when the row is hovered
+   or the text cursor lands in it. This mirrors the "recently
+   active" hint pattern and keeps the UI calm while still letting
+   the user reach for the bullet/caret when they need it. The
+   hover frame itself is unaffected. */
 body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty > .bt-marker > .bt-bullet,
 body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty > .bt-marker > .bt-caret {
-    visibility: hidden;
+    opacity: 0;
+    transition: opacity 1.5s ease-out;
+}
+body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty:hover > .bt-marker > .bt-bullet,
+body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker > .bt-bullet {
+    opacity: 1;
+    transition: opacity 0.15s ease-in;
+}
+/* Caret's rest opacity on parent rows is 0.55 (see the main caret
+   rule); match that on the restored state so the fade-in lands at
+   the same visual weight it would have in a non-blank row. */
+body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty:hover > .bt-marker > .bt-caret,
+body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker > .bt-caret {
+    opacity: 0.55;
+    transition: opacity 0.15s ease-in;
 }
 `;
 
