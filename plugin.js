@@ -354,6 +354,15 @@ body.ir-enabled .listitem-olist .listitem-indentline {
     visibility: visible !important;
 }
 
+/* When the user drags the guide-width slider to 0 ("Hidden"), the
+   width:0 on .listitem-indentline isn't sufficient on its own because
+   the display: block !important above, combined with Thymer's own
+   inline padding / background rules, still leave a 1px sliver visible.
+   Toggled by applySettingVars() when currentWidth === 0. */
+body.ir-enabled.ir-guides-hidden .listitem-indentline {
+    display: none !important;
+}
+
 /* Highlight on hover */
 body.ir-enabled .listitem:hover > .line-div > .listitem-indentline,
 body.ir-enabled .listitem:hover > .line-check-div ~ .line-div > .listitem-indentline,
@@ -585,6 +594,14 @@ body.ir-enabled.ir-bullets-always .bt-bullet {
 body.ir-enabled.ir-bullets-hover .listitem:hover > .bt-marker > .bt-bullet,
 body.ir-enabled.ir-bullets-hover .listitem.bt-focused > .bt-marker > .bt-bullet,
 body.ir-enabled.ir-bullets-hover .listitem.bt-thread-parent > .bt-marker > .bt-bullet {
+    --bt-bullet-fill: var(--bt-bullet-color, currentColor);
+}
+
+/* The focused (active) row's bullet always takes its level color, even
+   in "neutral" mode and even when the row is a childless leaf. Neutral
+   mode otherwise leaves bullets uniform gray; this single exception
+   makes the cursor's current line visually findable at a glance. */
+body.ir-enabled .listitem.bt-focused > .bt-marker > .bt-bullet {
     --bt-bullet-fill: var(--bt-bullet-color, currentColor);
 }
 
@@ -851,6 +868,11 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             root.setProperty('--bt-line-width', `${currentWidth}px`);
             root.setProperty('--bt-line-opacity', currentOpacity);
             root.setProperty('--bt-line-opacity-hover', Math.min(currentOpacity + 0.5, 0.9));
+            // When width is 0, toggle a class so CSS can fully hide the
+            // guide. Just zeroing width isn't enough — Thymer's inline
+            // padding, a leftover border, or our own display: block
+            // !important override keep a sliver visible.
+            document.body.classList.toggle('ir-guides-hidden', currentWidth === 0);
         };
 
         // Persist settings to localStorage (only called on user change).
@@ -1258,6 +1280,26 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         const INDENT_STEP = 30;
 
         const colorIndentLine = (item) => {
+            // Compute the row's level first so we can always mirror it onto
+            // --bt-bullet-color — even when the row has no indent-line
+            // (leaf rows, or parents whose only child is collapsed). The
+            // bullet lives outside .listitem-indentline, so its coloring
+            // can't depend on the indent-line's presence.
+            let marginLeft = 0;
+            for (let i = 0; i < item.children.length; i++) {
+                const child = item.children[i];
+                if (child.style && child.style.marginLeft) {
+                    const ml = parseInt(child.style.marginLeft) || 0;
+                    if (ml >= 0) { marginLeft = ml; break; }
+                }
+            }
+            if (marginLeft === 0 && item.style && item.style.marginLeft) {
+                marginLeft = parseInt(item.style.marginLeft) || 0;
+            }
+            const level = Math.max(0, Math.floor(marginLeft / INDENT_STEP));
+            const levelVar = `var(--ir-level-${level})`;
+            item.style.setProperty('--bt-bullet-color', levelVar);
+
             const indentLine = item.querySelector('.listitem-indentline');
             if (!indentLine) return;
 
@@ -1286,26 +1328,8 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
                 delete indentLine.dataset.btEmpty;
             }
 
-            let marginLeft = 0;
-            for (let i = 0; i < item.children.length; i++) {
-                const child = item.children[i];
-                if (child.style && child.style.marginLeft) {
-                    const ml = parseInt(child.style.marginLeft) || 0;
-                    if (ml >= 0) { marginLeft = ml; break; }
-                }
-            }
-            if (marginLeft === 0 && item.style && item.style.marginLeft) {
-                marginLeft = parseInt(item.style.marginLeft) || 0;
-            }
-
-            const level = Math.max(0, Math.floor(marginLeft / INDENT_STEP));
-            const levelVar = `var(--ir-level-${level})`;
             indentLine.style.setProperty('--ir-color', levelVar, 'important');
             indentLine.dataset.btManaged = '1';
-            // Mirror the level color onto the .listitem so the bullet (which is
-            // not a descendant of .listitem-indentline) can inherit it via
-            // --bt-bullet-color. Cheap, piggybacks on this existing pass.
-            item.style.setProperty('--bt-bullet-color', levelVar);
         };
 
         const clearListColors = () => {
@@ -2804,7 +2828,8 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         document.querySelectorAll('.bt-focused').forEach(el => el.classList.remove('bt-focused'));
         document.querySelectorAll('.bt-thread-parent').forEach(el => el.classList.remove('bt-thread-parent'));
         document.body.classList.remove('ir-enabled', 'bt-bullets', 'bt-toggles',
-            'ir-bullets-neutral', 'ir-bullets-hover', 'ir-bullets-always');
+            'ir-bullets-neutral', 'ir-bullets-hover', 'ir-bullets-always',
+            'ir-guides-hidden');
 
         if (this.styleElement) {
             this.styleElement.remove();
