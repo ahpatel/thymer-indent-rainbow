@@ -2140,6 +2140,15 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         // Per-guid last-seen folded state — avoids repeatedly re-diffing
         // the Set when a class mutation doesn't change fold state.
         const foldedLastSeen = new Map();
+        // Session-only retry counter. Incremented each time a restore
+        // attempt fails to actually fold a row (triggerNativeFold no-op'd,
+        // Thymer rejected the action, etc). When a guid hits RETRY_CAP
+        // we drop it from the persisted set so we stop thrashing on it.
+        const foldedRetry = new Map();
+        // Session-only skip list: guids we've given up on (retry cap hit).
+        // These are already removed from foldedSet; kept here so a later
+        // legitimate capture doesn't re-add them until the next session.
+        const foldedSkip = new Set();
         let foldedDirty = false;
         let foldedSaveTimer = null;
         // True while our restore pass is synthesizing fold clicks. Capture
@@ -2149,6 +2158,14 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         // Bumped on each panel.navigated; in-flight restore chunks check
         // this before proceeding so a rapid nav cancels the previous pass.
         let foldRestoreGen = 0;
+
+        // Hard cap on persisted guids. When exceeded, evict oldest-inserted
+        // (Set iteration order = insertion order; touch = delete+re-add
+        // to move to the end). Chosen conservatively — 5000 guids is ~180KB
+        // JSON, well under localStorage quota limits.
+        const FOLDED_CAP = 5000;
+        // Max restore attempts per guid before giving up for the session.
+        const FOLDED_RETRY_CAP = 3;
 
         const loadFoldedSet = () => {
             try {
@@ -2196,6 +2213,26 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             }, 500);
         };
 
+        // One-shot warning per session when the cap evicts an entry.
+        let foldedCapWarned = false;
+        const trimFoldedSetLRU = () => {
+            if (foldedSet.size <= FOLDED_CAP) return;
+            // Set iteration order = insertion order. Touch via
+            // delete+re-add elsewhere keeps most-recently-used at the end,
+            // so iterating from the start yields the oldest entries.
+            const toEvict = foldedSet.size - FOLDED_CAP;
+            const iter = foldedSet.values();
+            for (let i = 0; i < toEvict; i++) {
+                const g = iter.next().value;
+                if (g !== undefined) foldedSet.delete(g);
+            }
+            if (!foldedCapWarned) {
+                foldedCapWarned = true;
+                console.warn('[ir-fold] cap of', FOLDED_CAP,
+                    'guids reached; evicting oldest entries');
+            }
+        };
+
         // Called from the capture observer when a .listitem's class changes.
         // Fast-path early-returns when fold state hasn't actually flipped.
         const noteFoldStateChange = (li) => {
@@ -2209,11 +2246,27 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             if (prev === folded) return; // no flip — hot-path exit
             foldedLastSeen.set(guid, folded);
             const had = foldedSet.has(guid);
-            if (folded && !had) {
-                foldedSet.add(guid);
-                saveFoldedSetDebounced();
-            } else if (!folded && had) {
+            if (folded) {
+                if (foldedSkip.has(guid)) {
+                    // User re-folded a previously-given-up row — trust them,
+                    // clear the skip + retry state and re-persist.
+                    foldedSkip.delete(guid);
+                    foldedRetry.delete(guid);
+                }
+                // Delete + re-add to refresh LRU position (even if already
+                // present). Then trim if we're over the cap.
                 foldedSet.delete(guid);
+                foldedSet.add(guid);
+                trimFoldedSetLRU();
+                if (!had || foldedSet.size <= FOLDED_CAP) {
+                    saveFoldedSetDebounced();
+                }
+            } else if (had) {
+                foldedSet.delete(guid);
+                // A fresh manual unfold clears any prior give-up state so
+                // the user can fold → unfold → fold again normally.
+                foldedRetry.delete(guid);
+                foldedSkip.delete(guid);
                 saveFoldedSetDebounced();
             }
         };
@@ -2263,6 +2316,7 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             for (const li of rows) {
                 const g = li.getAttribute('data-guid');
                 if (!g || !foldedSet.has(g)) continue;
+                if (foldedSkip.has(g)) continue;              // gave up this session
                 if (li.classList.contains('listitem-folded')) continue;
                 if (!li.classList.contains('bt-has-children')) continue;
                 targets.push(li);
@@ -2273,6 +2327,10 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             }
             foldedDebug('restore:', targets.length, 'row(s)');
             const snap = snapshotSelection();
+            // Remember which guids this pass attempted, so we can verify
+            // success + increment retry counters once Thymer has had a
+            // chance to apply the class.
+            const attemptedGuids = targets.map(li => li.getAttribute('data-guid'));
 
             let i = 0;
             const step = () => {
@@ -2304,10 +2362,117 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
                     restoreSelectionSnapshot(snap);
                     foldedDebug('restore done in',
                         (performance.now() - started).toFixed(1), 'ms');
+                    // Verify each target actually folded. If a row is
+                    // still unfolded + still in our set + user hasn't
+                    // unfolded it manually (observer would have pulled it
+                    // from the set), bump the retry counter. Over the cap
+                    // → drop from set + skip for the rest of the session.
+                    // 800ms: triggerNativeFold has up to ~100ms of nested
+                    // setTimeout levels for the synthetic click sequence,
+                    // plus Thymer's own async fold handling. 800ms is
+                    // well beyond that without being user-visible.
+                    setTimeout(() => {
+                        if (this.isUnloaded) return;
+                        if (myGen !== foldRestoreGen) return;
+                        let dropped = 0;
+                        for (const g of attemptedGuids) {
+                            if (!g || !foldedSet.has(g) || foldedSkip.has(g)) continue;
+                            const sel = `.listitem[data-guid="${CSS.escape(g)}"]`;
+                            const li = editor.querySelector(sel);
+                            if (!li) continue;                          // row gone
+                            if (li.classList.contains('listitem-folded')) continue;
+                            const n = (foldedRetry.get(g) || 0) + 1;
+                            foldedRetry.set(g, n);
+                            if (n >= FOLDED_RETRY_CAP) {
+                                foldedSkip.add(g);
+                                foldedSet.delete(g);
+                                foldedLastSeen.delete(g);
+                                dropped++;
+                                foldedDebug('giving up on guid after',
+                                    n, 'tries:', g);
+                            }
+                        }
+                        if (dropped > 0) saveFoldedSetDebounced();
+                    }, 800);
                 }
             };
             requestAnimationFrame(step);
         };
+
+        // Bulk fold / unfold on the current page. Each call walks every
+        // visible .listitem in the editor and dispatches triggerNativeFold
+        // in rAF-chunked batches. Uses the same foldSelfApplying guard as
+        // the restore path so the capture observer doesn't fire 500 times
+        // in a tight loop while we batch — once we're done, the capture
+        // observer catches up naturally via Thymer's class mutations and
+        // persists the new state.
+        const BULK_CHUNK = 5;
+        const bulkFoldUnfold = (shouldCollapse) => {
+            const editor = document.querySelector(EDITOR_SELECTORS);
+            if (!editor) return 0;
+            const all = Array.from(editor.querySelectorAll('.listitem[data-guid]'));
+            const targets = all.filter(li => {
+                if (!li.isConnected) return false;
+                const isFolded = li.classList.contains('listitem-folded');
+                if (shouldCollapse) {
+                    // Fold: only rows that have children and aren't folded.
+                    return li.classList.contains('bt-has-children') && !isFolded;
+                }
+                // Unfold: only rows that ARE folded.
+                return isFolded;
+            });
+            if (targets.length === 0) return 0;
+            // Fold deepest-first (defensive — so parent collapses don't
+            // change what Thymer considers "the row" under our cursor).
+            // Unfold shallowest-first so the containing tree opens up
+            // top-down, reducing perceived re-flow churn.
+            const depth = (li) => {
+                let d = 0, cur = li.parentElement;
+                while (cur && cur !== editor) {
+                    if (cur.classList && cur.classList.contains('listitem')) d++;
+                    cur = cur.parentElement;
+                }
+                return d;
+            };
+            targets.sort((a, b) => shouldCollapse ? depth(b) - depth(a) : depth(a) - depth(b));
+
+            const snap = snapshotSelection();
+            let i = 0;
+            const step = () => {
+                if (this.isUnloaded) return;
+                foldSelfApplying = true;
+                try {
+                    const end = Math.min(i + BULK_CHUNK, targets.length);
+                    for (; i < end; i++) {
+                        const li = targets[i];
+                        if (!li.isConnected) continue;
+                        const isFolded = li.classList.contains('listitem-folded');
+                        if (shouldCollapse && isFolded) continue;
+                        if (!shouldCollapse && !isFolded) continue;
+                        triggerNativeFold(li, shouldCollapse);
+                    }
+                } finally {
+                    setTimeout(() => { foldSelfApplying = false; }, 0);
+                }
+                if (i < targets.length) {
+                    requestAnimationFrame(step);
+                } else {
+                    restoreSelectionSnapshot(snap);
+                    if (this.ui && typeof this.ui.showToaster === 'function') {
+                        this.ui.showToaster({
+                            message: shouldCollapse
+                                ? `Folded ${targets.length} row${targets.length === 1 ? '' : 's'}`
+                                : `Unfolded ${targets.length} row${targets.length === 1 ? '' : 's'}`,
+                            duration: 1500
+                        });
+                    }
+                }
+            };
+            requestAnimationFrame(step);
+            return targets.length;
+        };
+        const foldAllOnPage = () => bulkFoldUnfold(true);
+        const unfoldAllOnPage = () => bulkFoldUnfold(false);
 
         // Dedicated class-attr observer — kept separate from the outline
         // observer to avoid flooding the main pipeline with hover / focus
@@ -2363,6 +2528,8 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             try { foldCaptureObserver.disconnect(); } catch (_) {}
             saveFoldedSetImmediate();
             foldedLastSeen.clear();
+            foldedRetry.clear();
+            foldedSkip.clear();
             foldedSet = new Set();
             foldRestoreGen++; // invalidate any in-flight restore rAFs
         });
@@ -3288,6 +3455,36 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
                 const newPanel = await this.ui.createPanel();
                 if (newPanel) {
                     newPanel.navigateToCustomType("indent-rainbow-settings");
+                }
+            }
+        });
+
+        // Bulk fold/unfold commands — scoped to the currently-visible
+        // editor. Uses triggerNativeFold so arrow-key navigation stays
+        // correct after the batch.
+        this.ui.addCommandPaletteCommand({
+            label: "Fold All on this page",
+            icon: "chevron-right",
+            onSelected: () => {
+                const n = foldAllOnPage();
+                if (n === 0 && this.ui.showToaster) {
+                    this.ui.showToaster({
+                        message: 'Nothing to fold on this page',
+                        duration: 1500
+                    });
+                }
+            }
+        });
+        this.ui.addCommandPaletteCommand({
+            label: "Unfold All on this page",
+            icon: "chevron-down",
+            onSelected: () => {
+                const n = unfoldAllOnPage();
+                if (n === 0 && this.ui.showToaster) {
+                    this.ui.showToaster({
+                        message: 'Nothing to unfold on this page',
+                        duration: 1500
+                    });
                 }
             }
         });
