@@ -812,19 +812,26 @@ body.ir-enabled.bt-bullets .item-drag-handle {
    on wrapped rows the circle floats between lines. Overriding top to
    (1lh - 30px) / 2 lands the 27px circle's vertical center on the
    first-line midline regardless of row height. bottom: auto prevents
-   Thymer's bottom-anchor from fighting our top. */
+   Thymer's bottom-anchor from fighting our top.
+
+   NOTE: This rule is a FALLBACK. The canonical alignment is now set
+   by alignDragHandleToFirstLine() in JS, which measures the anchored
+   row's first-line midline against the .link-menu's actual top (see
+   linkMenuObserver). JS is needed because Thymer positions .link-menu
+   differently for last-in-hierarchy wrapped rows (popup centered on
+   the full row box, not its top) — pure CSS can't recover from that
+   since we don't know the delta statically. JS inline top naturally
+   wins over this calc. */
 body.ir-enabled.bt-toggles .item-drag-handle,
 body.ir-enabled.bt-bullets .item-drag-handle {
-    /* Pin the circle to the row's FIRST text line, matching where
-       .bt-marker's caret + bullet land. Using 0.5lh gives us exactly
-       the vertical midline of the first line-box, which is what we
-       want on wrapped rows — NOT the midline of the whole (tall) row.
-       Subtracting half the circle's height (27px / 2 ≈ 13.5px) lands
-       the circle's center on that midline.
-       The lh unit resolves to the element's own computed line-height;
-       since .link-menu inherits line-height from the listitem, the
-       math is correct for headings, body, and wrapped rows alike. */
-    top: calc(0.5lh - 13.5px) !important;
+    /* Pin the circle to the row's FIRST text baseline, matching where
+       .bt-marker's caret + bullet land. We measure from the top of
+       the row: 'top: calc(.5em - 13.5px)' puts the circle's vertical
+       center on the baseline of the first line's em-box (approx.
+       text baseline), regardless of the row's total height on
+       wrapped rows. 1em resolves to the listitem's own font-size, so
+       headings and body text both line up. */
+    top: calc(1em - 14.5px) !important;
     /* -24px previously produced an 11pt gap between the circle and
        the chevron; +5pt rightward (≈ 6.67px) closes that gap to the
        intended 6pt, matching the chevron↔bullet spacing. */
@@ -2747,93 +2754,118 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             linkMenu.insertBefore(handle, linkMenu.firstElementChild);
         };
 
-        // Align the drag-handle circle to the anchored row's FIRST line.
-        // CSS alone can't do this reliably because Thymer sets
-        // `.link-menu { top: rowMid }` and then (per our inspection)
-        // shifts it with a transform, so the menu's bounding top lives at
-        // row-mid-menuHeight/2. On a wrapped row that midpoint is between
-        // lines, so a static CSS offset for the handle lands below the
-        // first line like in the screenshot. We measure at runtime and
-        // set an inline `top` on the handle with `!important` so our
-        // stylesheet rule doesn't fight us.
+        // Pin the drag circle to the anchored row's FIRST-line midline via
+        // JS-measured inline `top`. Necessary because Thymer positions the
+        // `.link-menu` absolutely based on the hovered row, and for
+        // last-in-hierarchy wrapped rows the popup's `top` isn't the row's
+        // top (observed: ends up centered on the full row box, placing our
+        // CSS `top: calc(1em - 14.5px)` offset on a later line). Measuring
+        // the delta between `linkMenu.top` and `row.firstLineTop` lets the
+        // alignment survive Thymer's positioning strategy for any row.
+        // The existing CSS rule remains as a fallback for the first paint
+        // and for the rare case where the anchored row can't be resolved.
+        const DRAG_HANDLE_RADIUS = 13.5; // half of 27px circle
         const alignDragHandleToFirstLine = (linkMenu) => {
             if (!linkMenu || !linkMenu.isConnected) return;
+            // CSS rules that pin the drag handle are gated on bt-toggles
+            // or bt-bullets — match so we don't override the native look.
+            if (!isEnabled) return;
+            if (!isBulletsEnabled && !isTogglesEnabled) return;
             const handle = linkMenu.querySelector(':scope > .item-drag-handle');
             if (!handle) return;
             const guid = linkMenu.getAttribute('data-guid');
             if (!guid) return;
             const row = document.querySelector(
-                `.listitem[data-guid="${CSS.escape(guid)}"]`
-            );
-            if (!row) return;
+                `.listitem[data-guid="${CSS.escape(guid)}"]`);
+            if (!row || !row.isConnected) return;
             const rowRect = row.getBoundingClientRect();
             const menuRect = linkMenu.getBoundingClientRect();
-            // Read the row's computed line-height. Returns "normal" for
-            // unset line-height — fall back to 1.4 × font-size in that
-            // case (roughly matches Chromium's "normal" calculation).
+            if (rowRect.height === 0 || menuRect.height === 0) return;
+            // Resolve the row's line-height to a pixel value. `lineHeight:
+            // normal` falls back to the row's full box height (single-line
+            // rows) which is still correct: firstLineMid === rowMid.
             const cs = getComputedStyle(row);
-            let lh = parseFloat(cs.lineHeight);
-            if (!Number.isFinite(lh) || lh <= 0) {
-                lh = parseFloat(cs.fontSize) * 1.4;
+            let lineHeightPx = parseFloat(cs.lineHeight);
+            if (!Number.isFinite(lineHeightPx) || lineHeightPx <= 0) {
+                lineHeightPx = rowRect.height;
             }
-            // Viewport Y of the first line's vertical midline.
-            const firstLineMidY = rowRect.top + lh / 2;
-            // Measure the handle's own height (may differ between states;
-            // our CSS pins it to 27px but be defensive).
-            const handleH = handle.offsetHeight || 27;
-            // Handle top RELATIVE TO THE LINK-MENU's top (which is the
-            // handle's containing block since link-menu is positioned).
-            // Landing the handle's vertical center on firstLineMidY:
-            //   handleTopInMenu = firstLineMidY - menuTop - handleH/2
-            const top = firstLineMidY - menuRect.top - handleH / 2;
-            // setProperty with 'important' so our earlier stylesheet
-            // top override doesn't win over this live measurement.
-            handle.style.setProperty('top', `${Math.round(top)}px`, 'important');
-            handle.style.setProperty('bottom', 'auto', 'important');
+            const firstLineMidY = rowRect.top + lineHeightPx / 2;
+            const offsetTop = firstLineMidY - menuRect.top - DRAG_HANDLE_RADIUS;
+            // Avoid layout thrash: skip re-writing when the value hasn't
+            // changed meaningfully (sub-pixel noise on rapid repositions).
+            const prev = parseFloat(handle.style.top);
+            if (Number.isFinite(prev) && Math.abs(prev - offsetTop) < 0.5) return;
+            handle.style.top = offsetTop + 'px';
+            handle.style.bottom = 'auto';
         };
 
-        const processLinkMenu = (linkMenu) => {
+        // Per-menu style observer. Thymer re-uses a single `.link-menu`
+        // across hovered rows by updating its inline `top`/`left` —
+        // meaning a child-attach observer alone only catches the first
+        // anchor. Watching `style` on each `.link-menu` catches the
+        // subsequent re-anchors and keeps the drag circle pinned.
+        const perMenuObservers = new WeakMap();
+        const attachPerMenuObserver = (linkMenu) => {
+            if (!linkMenu || perMenuObservers.has(linkMenu)) return;
+            const obs = new MutationObserver(() => {
+                if (this.isUnloaded) return;
+                alignDragHandleToFirstLine(linkMenu);
+            });
+            obs.observe(linkMenu, { attributes: true, attributeFilter: ['style', 'data-guid'] });
+            perMenuObservers.set(linkMenu, obs);
+        };
+        const onLinkMenuAdded = (linkMenu) => {
             reorderLinkMenu(linkMenu);
-            alignDragHandleToFirstLine(linkMenu);
+            attachPerMenuObserver(linkMenu);
+            // rAF so Thymer's initial inline top/left are in place before
+            // we measure (style is assigned after insertion in some paths).
+            requestAnimationFrame(() => alignDragHandleToFirstLine(linkMenu));
+        };
+        const detachPerMenuObserver = (linkMenu) => {
+            const obs = perMenuObservers.get(linkMenu);
+            if (!obs) return;
+            try { obs.disconnect(); } catch (_) {}
+            perMenuObservers.delete(linkMenu);
+            // Also strip our inline overrides so a reused .link-menu
+            // doesn't carry stale positioning into the next hover.
+            const handle = linkMenu.querySelector
+                ? linkMenu.querySelector(':scope > .item-drag-handle')
+                : null;
+            if (handle) {
+                handle.style.top = '';
+                handle.style.bottom = '';
+            }
         };
         const linkMenuObserver = new MutationObserver((mutations) => {
             if (this.isUnloaded) return;
-            const touched = new Set();
             for (const m of mutations) {
-                // Newly-inserted link-menu nodes (or subtree containing
-                // one).
                 for (const node of m.addedNodes) {
                     if (!(node instanceof Element)) continue;
                     if (node.classList && node.classList.contains('link-menu')) {
-                        touched.add(node);
+                        onLinkMenuAdded(node);
                     } else if (node.querySelectorAll) {
-                        node.querySelectorAll('.link-menu').forEach(n => touched.add(n));
+                        node.querySelectorAll('.link-menu').forEach(onLinkMenuAdded);
                     }
                 }
-                // Thymer re-positions the menu or re-anchors it to a
-                // different row by mutating `style` / `data-guid` on an
-                // existing link-menu. Re-align in both cases so the
-                // handle follows.
-                if (m.type === 'attributes' && m.target instanceof Element
-                    && m.target.classList && m.target.classList.contains('link-menu')) {
-                    touched.add(m.target);
+                for (const node of m.removedNodes) {
+                    if (!(node instanceof Element)) continue;
+                    if (node.classList && node.classList.contains('link-menu')) {
+                        detachPerMenuObserver(node);
+                    } else if (node.querySelectorAll) {
+                        node.querySelectorAll('.link-menu').forEach(detachPerMenuObserver);
+                    }
                 }
             }
-            for (const menu of touched) processLinkMenu(menu);
         });
-        linkMenuObserver.observe(outlineTarget, {
-            childList: true,
-            subtree: true,
-            attributes: true,
-            // style + data-guid only — not class. Thymer repositions
-            // .link-menu via inline style and re-anchors via data-guid;
-            // class changes fire on every listitem hover/focus which
-            // would thrash the observer for no gain.
-            attributeFilter: ['style', 'data-guid'],
+        linkMenuObserver.observe(outlineTarget, { childList: true, subtree: true });
+        // Bootstrap any .link-menu nodes already present at load.
+        outlineTarget.querySelectorAll('.link-menu').forEach(onLinkMenuAdded);
+        this.cleanupMethods.push(() => {
+            linkMenuObserver.disconnect();
+            // Tear down every per-menu observer + clear inline overrides
+            // so the plugin leaves no residual positioning behind.
+            document.querySelectorAll('.link-menu').forEach(detachPerMenuObserver);
         });
-        // Process any .link-menu nodes already present at load.
-        outlineTarget.querySelectorAll('.link-menu').forEach(processLinkMenu);
-        this.cleanupMethods.push(() => linkMenuObserver.disconnect());
 
         // ---------- GUID resolution + zoom ----------
         // Resolve the GUID of a .listitem. Try data-guid attrs first, then
