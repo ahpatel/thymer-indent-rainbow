@@ -3462,31 +3462,34 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         // Bulk fold/unfold commands — scoped to the currently-visible
         // editor. Uses triggerNativeFold so arrow-key navigation stays
         // correct after the batch.
+        //
+        // IMPORTANT: Defer the batch via setTimeout so the command
+        // palette fully closes first. triggerNativeFold dispatches
+        // synthetic pointer events at the row's viewport coordinates +
+        // hit-tests via document.elementFromPoint; if the palette
+        // overlay is still up it intercepts those events and the fold
+        // no-ops. 50ms is enough for Thymer's palette close animation;
+        // any remaining ms overlap is invisible to the user.
+        const runBulkDeferred = (fn, emptyMsg) => setTimeout(() => {
+            if (this.isUnloaded) return;
+            const n = fn();
+            if (n === 0 && this.ui && typeof this.ui.showToaster === 'function') {
+                this.ui.showToaster({ message: emptyMsg, duration: 1500 });
+            }
+        }, 50);
         this.ui.addCommandPaletteCommand({
             label: "Fold All on this page",
             icon: "chevron-right",
-            onSelected: () => {
-                const n = foldAllOnPage();
-                if (n === 0 && this.ui.showToaster) {
-                    this.ui.showToaster({
-                        message: 'Nothing to fold on this page',
-                        duration: 1500
-                    });
-                }
-            }
+            onSelected: () => runBulkDeferred(
+                foldAllOnPage, 'Nothing to fold on this page'
+            )
         });
         this.ui.addCommandPaletteCommand({
             label: "Unfold All on this page",
             icon: "chevron-down",
-            onSelected: () => {
-                const n = unfoldAllOnPage();
-                if (n === 0 && this.ui.showToaster) {
-                    this.ui.showToaster({
-                        message: 'Nothing to unfold on this page',
-                        duration: 1500
-                    });
-                }
-            }
+            onSelected: () => runBulkDeferred(
+                unfoldAllOnPage, 'Nothing to unfold on this page'
+            )
         });
 
     }
