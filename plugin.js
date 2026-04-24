@@ -1645,12 +1645,6 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             outlineMutating = true;
             li.insertBefore(marker, li.firstElementChild);
             outlineMutating = false;
-            // Mirror the native link-menu tooltips onto the in-row
-            // affordances so hover hints match the native UI. Safe to
-            // call even before a link-menu has been seen — the fallback
-            // English strings from `nativeTooltips` apply until the
-            // first capture.
-            applyMarkerTooltips(li);
             // The caret may have been sitting at listitem offset 0 just
             // before the insert (newly-created empty row case). After the
             // insert, offset 0 now points before our marker. Forward it.
@@ -1874,9 +1868,6 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
                 caret.classList.remove('ti-chevron-down');
                 caret.classList.add('ti-chevron-right');
             }
-            // Keep the caret's hover title in sync with fold state so
-            // the tooltip reflects what a click will do.
-            applyMarkerTooltips(li);
         };
 
         // Previously this function hid descendant rows by setting
@@ -2749,77 +2740,142 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             document.body.classList.remove('bt-bullets', 'bt-toggles');
         });
 
-        // ----- Native tooltip text capture -----
+        // ----- Native tooltip forwarding -----
         // The user's in-row affordances (.bt-caret, .bt-bullet) replace
         // what the native .link-menu popup exposes (collapse/expand/zoom)
-        // when our toggles + bullets settings are on. To keep parity,
-        // mirror the native tooltips onto our elements: "Collapse" /
-        // "Expand" on .bt-caret (toggled in updateCaretIcon) and the
-        // zoom tooltip on .bt-bullet.
+        // when our toggles + bullets settings are on. To show Thymer's
+        // rich tooltip (with keyboard shortcut chips) on our elements,
+        // we SYNTHESIZE hover events on the hidden native action button
+        // of the same row whenever the user hovers our element. Thymer's
+        // tooltip system fires naturally; the tooltip appears anchored
+        // to the native button's position (roughly the row's drag-handle
+        // column).
         //
-        // Native text is read lazily from the first .link-menu that
-        // appears in the DOM — we check title / aria-label / data-tooltip
-        // in that order and cache whichever is populated. Hardcoded
-        // English fallbacks ensure tooltips appear even before any
-        // link-menu has been seen (e.g. if the user hovers a row-caret
-        // before ever hovering the native popup).
-        const nativeTooltips = {
-            collapse: 'Collapse',
-            expand: 'Expand',
-            zoom: 'Zoom in',
+        // Approach:
+        //   - On .bt-caret hover: dispatch pointerenter/mouseenter on
+        //     .link-menu-action-collapse OR -expand for that row's menu,
+        //     based on current fold state. Dispatch leave on exit.
+        //   - On .bt-bullet hover: dispatch on .link-menu-action-zoom.
+        //   - Resolve the row's link-menu via data-guid; the native
+        //     button is a child of that menu.
+        //
+        // The title-attribute fallback (prior implementation) is removed
+        // so we don't get double tooltips when both fire.
+        const findActionButtonForRow = (li, kind) => {
+            if (!li) return null;
+            const guid = li.getAttribute('data-guid');
+            const menu = guid
+                ? document.querySelector(`.link-menu[data-guid="${CSS.escape(guid)}"]`)
+                : null;
+            if (!menu) return null;
+            let selector;
+            if (kind === 'zoom') {
+                selector = ':scope > .link-menu-action-zoom';
+            } else if (kind === 'collapse') {
+                // Thymer toggles between the two based on current state.
+                // Pick whichever is currently in the DOM.
+                return menu.querySelector(':scope > .link-menu-action-collapse')
+                    || menu.querySelector(':scope > .link-menu-action-expand');
+            } else {
+                return null;
+            }
+            return menu.querySelector(selector);
         };
-        const readBtnTooltip = (el) => {
-            if (!el) return null;
-            return el.getAttribute('title')
-                || el.getAttribute('aria-label')
-                || el.getAttribute('data-tooltip')
-                || null;
-        };
-        let tooltipsCaptured = false;
-        const captureNativeTooltips = (linkMenu) => {
-            if (!linkMenu || !linkMenu.querySelector) return;
-            const c = linkMenu.querySelector(':scope > .link-menu-action-collapse');
-            const e = linkMenu.querySelector(':scope > .link-menu-action-expand');
-            const z = linkMenu.querySelector(':scope > .link-menu-action-zoom');
-            let changed = false;
-            const ct = readBtnTooltip(c);
-            if (ct && ct !== nativeTooltips.collapse) { nativeTooltips.collapse = ct; changed = true; }
-            const et = readBtnTooltip(e);
-            if (et && et !== nativeTooltips.expand) { nativeTooltips.expand = et; changed = true; }
-            const zt = readBtnTooltip(z);
-            if (zt && zt !== nativeTooltips.zoom) { nativeTooltips.zoom = zt; changed = true; }
-            // First time we harvest text different from the English
-            // fallbacks, re-apply to every row so existing markers pick
-            // up the native wording without waiting for the next
-            // outline / caret-update pass.
-            if (changed && !tooltipsCaptured) {
-                tooltipsCaptured = true;
-                document.querySelectorAll('.listitem').forEach(applyMarkerTooltips);
+        const dispatchHoverOn = (btn, entering, coordsFrom) => {
+            if (!btn) return;
+            // Position the tooltip via clientX/Y on our synthetic events.
+            // Prefer the coords of the element the user is ACTUALLY
+            // hovering (bt-caret / bt-bullet) so the tooltip anchors
+            // under the cursor — not the native button (which may be
+            // display:none in both-on mode, making its rect 0,0,0,0 and
+            // tooltip fly to page origin).
+            let cx = 0, cy = 0;
+            const src = coordsFrom || btn;
+            const r = src.getBoundingClientRect();
+            if (r.width > 0 || r.height > 0) {
+                cx = r.left + r.width / 2;
+                cy = r.top + r.height / 2;
+            }
+            const mouseOpts = {
+                bubbles: true, cancelable: true, composed: true,
+                view: window, clientX: cx, clientY: cy,
+            };
+            const pointerOpts = Object.assign({
+                pointerId: 2, pointerType: 'mouse', isPrimary: true,
+            }, mouseOpts);
+            const dispatch = (type, Ctor, opts) => {
+                try { btn.dispatchEvent(new Ctor(type, opts)); } catch (_) {}
+            };
+            if (entering) {
+                dispatch('pointerover', PointerEvent, pointerOpts);
+                dispatch('pointerenter', PointerEvent, pointerOpts);
+                dispatch('mouseover', MouseEvent, mouseOpts);
+                dispatch('mouseenter', MouseEvent, mouseOpts);
+                dispatch('pointermove', PointerEvent, pointerOpts);
+                dispatch('mousemove', MouseEvent, mouseOpts);
+            } else {
+                dispatch('pointerleave', PointerEvent, pointerOpts);
+                dispatch('pointerout', PointerEvent, pointerOpts);
+                dispatch('mouseleave', MouseEvent, mouseOpts);
+                dispatch('mouseout', MouseEvent, mouseOpts);
             }
         };
 
-        // Apply the cached native tooltip to a row's in-row affordances.
-        // Bullet tooltip is static ("Zoom in"); caret toggles based on
-        // current fold state so the hover hint matches what a click will
-        // do — mirroring Thymer's own link-menu behavior where the
-        // button label flips between Collapse and Expand.
-        const applyMarkerTooltips = (li) => {
-            if (!li || !li.classList?.contains('listitem')) return;
-            const marker = li.firstElementChild;
-            if (!marker || !marker.classList?.contains('bt-marker')) return;
-            const caret = marker.querySelector(':scope > .bt-caret');
-            const bullet = marker.querySelector(':scope > .bt-bullet');
-            if (bullet && bullet.getAttribute('title') !== nativeTooltips.zoom) {
-                bullet.setAttribute('title', nativeTooltips.zoom);
+        // Track what we're currently forwarding to so we can leave it on
+        // exit even if the user moved to a different row's caret/bullet.
+        let forwardedBtn = null;
+        let forwardedSrc = null;
+        const enterForward = (btn, src) => {
+            if (!btn) return;
+            if (btn === forwardedBtn && src === forwardedSrc) return;
+            if (forwardedBtn) dispatchHoverOn(forwardedBtn, false, forwardedSrc);
+            forwardedBtn = btn;
+            forwardedSrc = src || null;
+            dispatchHoverOn(btn, true, src);
+        };
+        const leaveForward = () => {
+            if (!forwardedBtn) return;
+            dispatchHoverOn(forwardedBtn, false, forwardedSrc);
+            forwardedBtn = null;
+            forwardedSrc = null;
+        };
+
+        const onMarkerHover = (e) => {
+            if (!isEnabled) return;
+            const t = e.target;
+            if (!t || !t.closest) return;
+            const caret = t.closest('.bt-caret');
+            if (caret && isTogglesEnabled) {
+                const li = caret.closest('.listitem');
+                const btn = findActionButtonForRow(li, 'collapse');
+                enterForward(btn, caret);
+                return;
             }
-            if (caret) {
-                const folded = li.classList.contains('listitem-folded');
-                const want = folded ? nativeTooltips.expand : nativeTooltips.collapse;
-                if (caret.getAttribute('title') !== want) {
-                    caret.setAttribute('title', want);
-                }
+            const bullet = t.closest('.bt-bullet');
+            if (bullet && isBulletsEnabled) {
+                const li = bullet.closest('.listitem');
+                const btn = findActionButtonForRow(li, 'zoom');
+                enterForward(btn, bullet);
+                return;
             }
         };
+        const onMarkerHoverOut = (e) => {
+            if (!forwardedBtn) return;
+            const to = e.relatedTarget;
+            if (to && to.closest) {
+                // Still on some .bt-caret / .bt-bullet → let the next
+                // mouseover fire and re-target if needed.
+                if (to.closest('.bt-caret') || to.closest('.bt-bullet')) return;
+            }
+            leaveForward();
+        };
+        document.addEventListener('mouseover', onMarkerHover, true);
+        document.addEventListener('mouseout', onMarkerHoverOut, true);
+        this.cleanupMethods.push(() => {
+            document.removeEventListener('mouseover', onMarkerHover, true);
+            document.removeEventListener('mouseout', onMarkerHoverOut, true);
+            leaveForward();
+        });
 
         // ----- link-menu drag-handle DOM reorder -----
         // When Thymer injects a .link-menu hover popup, move .item-drag-handle
@@ -2898,10 +2954,6 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         const onLinkMenuAdded = (linkMenu) => {
             reorderLinkMenu(linkMenu);
             attachPerMenuObserver(linkMenu);
-            // Harvest the native tooltip strings (collapse/expand/zoom)
-            // off this menu's action buttons so subsequent .bt-caret /
-            // .bt-bullet hovers show the same hint text Thymer uses.
-            captureNativeTooltips(linkMenu);
             // rAF so Thymer's initial inline top/left are in place before
             // we measure (style is assigned after insertion in some paths).
             requestAnimationFrame(() => alignDragHandleToFirstLine(linkMenu));
