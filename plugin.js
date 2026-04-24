@@ -499,6 +499,10 @@ body.ir-enabled .bt-caret {
     cursor: pointer;
     transition: opacity 0.12s ease;
     flex-shrink: 0;
+    /* Tabler's chevron is a single-weight icon font, so font-weight has
+       no effect. Use a text stroke to thicken the drawn glyph. */
+    -webkit-text-stroke: 1px currentColor;
+    text-stroke: 1px currentColor;
 }
 
 /* Reserve space for the caret on every row (visible or not) so bullets
@@ -573,11 +577,14 @@ body.ir-enabled.ir-bullets-always .bt-bullet {
 }
 
 /* Rainbow-on-hover mode: bullet stays uniform at rest, takes the level
-   color whenever the mouse is anywhere on the row OR the cursor is on
-   the row (.bt-focused). Scoped to the row's own bullet via the direct
-   descendant marker so hovering a parent doesn't tint its children. */
+   color whenever the mouse is anywhere on the row, the cursor is on the
+   row (.bt-focused), OR the row is an ancestor of the focused row
+   (.bt-thread-parent) — so the full active-thread path stays tinted.
+   Scoped to the row's own bullet via the direct descendant marker so
+   hovering a parent doesn't tint its children. */
 body.ir-enabled.ir-bullets-hover .listitem:hover > .bt-marker > .bt-bullet,
-body.ir-enabled.ir-bullets-hover .listitem.bt-focused > .bt-marker > .bt-bullet {
+body.ir-enabled.ir-bullets-hover .listitem.bt-focused > .bt-marker > .bt-bullet,
+body.ir-enabled.ir-bullets-hover .listitem.bt-thread-parent > .bt-marker > .bt-bullet {
     --bt-bullet-fill: var(--bt-bullet-color, currentColor);
 }
 
@@ -886,6 +893,9 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         // or click listeners.
 
         let currentFocusedItem = null;
+        let currentThreadParents = []; // Ancestors of the focused row — used
+                                       // to extend hover-mode bullet coloring
+                                       // across the full active thread path.
         let rafPending = false;
         let activeHighlights = []; // Cache highlight elements for faster cleanup
 
@@ -963,9 +973,10 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
 
             // --- READ PHASE --- (Avoid layout thrashing)
             const highlightData = [];
+            let parents = [];
 
             if (node && document.body.contains(node) && node.offsetParent !== null) {
-                const parents = getParents(node);
+                parents = getParents(node);
 
                 if (parents.length > 0) {
                     const targetLineDiv = node.querySelector('.line-div') || node;
@@ -1140,6 +1151,19 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
                 if (node) node.classList.add('bt-focused');
                 currentFocusedItem = node;
             }
+
+            // Sync `.bt-thread-parent` on the focused row's ancestors so
+            // hover-mode can tint the full active path (not just the
+            // hovered/focused row). Diff against the previous set to avoid
+            // thrashing classes on every rAF tick.
+            const nextSet = new Set(parents);
+            for (const prev of currentThreadParents) {
+                if (!nextSet.has(prev)) prev.classList.remove('bt-thread-parent');
+            }
+            for (const p of parents) {
+                if (!p.classList.contains('bt-thread-parent')) p.classList.add('bt-thread-parent');
+            }
+            currentThreadParents = parents;
 
             for (let i = 0; i < highlightData.length; i++) {
                 const data = highlightData[i];
@@ -2657,6 +2681,7 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         let statusBarItem = null;
         this.cleanupMethods.push(() => {
             currentFocusedItem = null;
+            currentThreadParents = [];
             activeHighlights.length = 0;
             statusBarItem = null;
         });
@@ -2777,6 +2802,7 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
 
         document.querySelectorAll('.bt-active-highlight').forEach(el => el.remove());
         document.querySelectorAll('.bt-focused').forEach(el => el.classList.remove('bt-focused'));
+        document.querySelectorAll('.bt-thread-parent').forEach(el => el.classList.remove('bt-thread-parent'));
         document.body.classList.remove('ir-enabled', 'bt-bullets', 'bt-toggles',
             'ir-bullets-neutral', 'ir-bullets-hover', 'ir-bullets-always');
 
@@ -2797,7 +2823,7 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         const style = document.createElement('style');
         style.textContent = `
             .ir-settings * { box-sizing: border-box; }
-            .ir-settings { 
+            .ir-settings {
                 --ir-accent: var(--theme-accent, var(--button-primary-bg-color, var(--cmdpal-selected-bg-color, var(--color-primary-400, #3b82f6))));
                 --ir-accent-subtle: var(--theme-accent-subtle, rgba(59, 130, 246, 0.15));
                 --ir-text: var(--theme-text-primary, var(--color-text-100, #fff));
@@ -2808,11 +2834,23 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
                 --ir-panel-bg: var(--theme-background-primary, var(--color-bg-800, #111));
                 --ir-panel-border: color-mix(in srgb, var(--ir-border) 78%, transparent);
                 --ir-soft-bg: color-mix(in srgb, var(--ir-bg) 82%, var(--ir-panel-bg));
-                
-                padding: 24px 24px 40px; 
-                max-width: 760px; 
-                margin: 0 auto; 
-                font-family: var(--font-m, var(--font-primary, inherit)); 
+
+                /* Establish an inline-size container so nested rules can
+                   adapt to the panel width rather than the viewport — the
+                   settings panel can be docked narrow even when the
+                   window is wide. 'width: 100%' is critical here: without
+                   it, when the panel host is a flex item, container-type
+                   collapses the element to its min-content width (one
+                   word per line). */
+                container-type: inline-size;
+                container-name: ir-settings;
+                width: 100%;
+                box-sizing: border-box;
+
+                padding: 24px clamp(14px, 4cqi, 28px) 40px;
+                max-width: 760px;
+                margin: 0 auto;
+                font-family: var(--font-m, var(--font-primary, inherit));
                 color: var(--ir-text);
                 line-height: 1.5;
             }
@@ -2875,10 +2913,12 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             .ir-subtitle { font-size: 0.9em; color: var(--ir-text-secondary); opacity: 0.9; }
             .ir-control {
                 width: min(280px, 44%);
+                min-width: 140px;
                 flex-shrink: 0;
             }
             .ir-slider-control {
                 width: min(320px, 48%);
+                min-width: 160px;
                 flex-shrink: 0;
             }
             .ir-input { 
@@ -3064,17 +3104,46 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
                 color: var(--ir-text-secondary);
                 opacity: 0.75;
             }
-            @media (max-width: 720px) {
-                .ir-settings {
-                    padding: 18px 16px 32px;
-                }
+            /* Container-query-based responsiveness: the settings panel is
+               often docked narrow inside Thymer even when the viewport is
+               wide, so we adapt to the panel's own inline size. */
+            @container ir-settings (max-width: 560px) {
                 .ir-row {
                     flex-direction: column;
                     align-items: stretch;
+                    gap: 10px;
                 }
                 .ir-control,
                 .ir-slider-control {
                     width: 100%;
+                    min-width: 0;
+                }
+                .ir-card {
+                    padding: 14px 14px 4px;
+                    border-radius: 12px;
+                }
+                .ir-preview {
+                    padding: 12px 14px 12px;
+                    border-radius: 12px;
+                }
+                .ir-header { margin-bottom: 14px; }
+                .ir-title { font-size: 1.2em; }
+            }
+            @container ir-settings (max-width: 380px) {
+                .ir-settings { padding-top: 18px; padding-bottom: 28px; }
+                .ir-card { padding: 12px 12px 2px; margin-bottom: 12px; }
+                .ir-preview-canvas { height: 96px; }
+                .ir-val-text { min-width: 44px; padding: 2px 8px; }
+                .ir-header-copy { font-size: 0.9em; }
+            }
+            /* Fallback for environments without container-query support:
+               fall back to viewport-based breakpoints so the panel still
+               behaves reasonably. */
+            @supports not (container-type: inline-size) {
+                @media (max-width: 720px) {
+                    .ir-settings { padding: 18px 16px 32px; }
+                    .ir-row { flex-direction: column; align-items: stretch; }
+                    .ir-control, .ir-slider-control { width: 100%; min-width: 0; }
                 }
             }
         `;
@@ -3470,8 +3539,8 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         bulletColorSelect.className = 'ir-input cursor-pointer';
         const bulletColorOptions = [
             { value: 'neutral', label: 'Neutral (uniform gray)' },
-            { value: 'hover',   label: 'Rainbow on hover' },
-            { value: 'always',  label: 'Rainbow always' },
+            { value: 'hover',   label: 'Color active thread' },
+            { value: 'always',  label: 'Color all parents' },
         ];
         const currentBulletColorMode = (currentSettings.bulletColorMode === 'neutral'
             || currentSettings.bulletColorMode === 'hover'
