@@ -2306,8 +2306,10 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             if (!isEnabled) return;
             if (!isRememberFoldsEnabled) return;
             if (foldedSet.size === 0) return;
-            const editor = document.querySelector(EDITOR_SELECTORS);
-            if (!editor) return;
+            // Fall back to document-wide search — matches other plugin
+            // features (outline observer, etc). EDITOR_SELECTORS doesn't
+            // always match in the current Thymer build.
+            const editor = document.querySelector(EDITOR_SELECTORS) || document.body;
 
             const started = performance.now();
             const myGen = ++foldRestoreGen;
@@ -2408,9 +2410,13 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         // persists the new state.
         const BULK_CHUNK = 5;
         const bulkFoldUnfold = (shouldCollapse) => {
-            const editor = document.querySelector(EDITOR_SELECTORS);
-            if (!editor) return 0;
-            const all = Array.from(editor.querySelectorAll('.listitem[data-guid]'));
+            // Fall back to document-wide search if EDITOR_SELECTORS doesn't
+            // match (Thymer's DOM shape varies across builds — other plugin
+            // features use the same fallback). We also drop the
+            // [data-guid] filter: guid isn't needed to fold a row, and
+            // Thymer doesn't always expose it on every listitem.
+            const editor = document.querySelector(EDITOR_SELECTORS) || document.body;
+            const all = Array.from(editor.querySelectorAll('.listitem'));
             const targets = all.filter(li => {
                 if (!li.isConnected) return false;
                 const isFolded = li.classList.contains('listitem-folded');
