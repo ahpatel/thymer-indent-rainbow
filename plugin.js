@@ -560,17 +560,25 @@ body.ir-enabled .listitem:not(.listitem-text):not(.listitem-task):not(.listitem-
    heading-center rule above catches them. With a tall embed, the
    marker + hover frame end up at the vertical midpoint of the
    whole card instead of on the first-line area where the user
-   expects to click for fold/drag. Detect any row that contains an
-   <img>/<video>/<iframe> descendant and restore the default
-   first-line baseline behavior from the main .bt-marker rule. */
+   expects to click for fold/drag. Detect any row that contains a
+   media descendant and restore the first-line baseline behavior.
+
+   !important is required here because the heading-center rule chains
+   four :not() pseudos (specificity 0,5,0) while :has() inherits only
+   its most-specific argument's specificity (max 0,1,1 for element
+   selectors). Without !important the heading rule wins the cascade. */
 body.ir-enabled .listitem:has(img) > .bt-marker,
 body.ir-enabled .listitem:has(video) > .bt-marker,
 body.ir-enabled .listitem:has(iframe) > .bt-marker,
 body.ir-enabled .listitem:has(picture) > .bt-marker,
-body.ir-enabled .listitem:has(canvas) > .bt-marker {
-    align-self: baseline;
-    vertical-align: baseline;
-    transform: translateY(var(--bt-marker-nudge));
+body.ir-enabled .listitem:has(canvas) > .bt-marker,
+body.ir-enabled .listitem:has([class*="embed"]) > .bt-marker,
+body.ir-enabled .listitem:has([class*="card"]) > .bt-marker,
+body.ir-enabled .listitem:has([class*="attachment"]) > .bt-marker,
+body.ir-enabled .listitem:has([class*="preview"]) > .bt-marker {
+    align-self: baseline !important;
+    vertical-align: baseline !important;
+    transform: translateY(var(--bt-marker-nudge)) !important;
 }
 
 /* Knockout disc behind the caret and bullet so the rainbow active-thread
