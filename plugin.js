@@ -1555,155 +1555,37 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         // our own observer callback infinitely.
         let outlineMutating = false;
 
-        // ----- Caret placement around our in-row marker -----
-        //
-        // We inject <span class="bt-marker" contenteditable="false"> as the
-        // FIRST child of every .listitem. That shifts the valid "row-start"
-        // caret position: listitem offset 0 now points BEFORE the marker,
-        // which visually looks like the caret is left of the bullet and
-        // causes typed characters to land pre-marker.
-        //
-        // The Enter key is the main offender — Thymer's own post-Enter caret
-        // placement captures an anchor before our MutationObserver has
-        // injected the marker, then re-applies it on a later tick. See
-        // /Users/anish/.windsurf/plans/enter-caret-fix-34570a.md for the
-        // race model.
-        //
-        // This block provides three layers:
-        //   (1) `caretIsPreMarker(sel)` — broad detector covering all three
-        //       symptom classes (container=listitem, text-node sibling of
-        //       marker, cursor inside marker subtree).
-        //   (2) `findEditableCaretAnchor(li)` — walks past non-editable
-        //       indent carriers (.line-check-div / -bullet-div / -number-div)
-        //       to the .line-div and returns a Range at its first text
-        //       position. Handles task / ulist / olist rows correctly.
-        //   (3) `forwardCursorPastMarker(li?)` — the public entry point.
-        //       No-op when the caret is already safe. Invoked from
-        //       selectionchange, beforeinput, injectMarker's retry ladder,
-        //       and the lineitem.created handler.
+        // If the caret currently sits at listitem offset 0 (i.e. BEFORE our
+        // injected marker), forward it to the start of the next sibling so
+        // typing begins inside the text area rather than to the left of the
+        // bullet. Called from two places:
+        //   - selectionchange listener (covers clicks / arrow navigation)
+        //   - injectMarker right after insertBefore (covers the Enter-
+        //     to-create-new-row case, where the caret is placed BEFORE the
+        //     marker DOM-wise via a pure mutation that doesn't re-fire
+        //     selectionchange)
         let cursorForwardBusy = false;
-
-        // Return the owning .listitem when the selection's caret is in a
-        // position that would be "pre-marker" for that row; otherwise null.
-        // Accepts a preferred `li` to scope (passed from per-row call sites).
-        const caretIsPreMarker = (sel, preferredLi) => {
-            if (!sel || !sel.rangeCount) return null;
-            const range = sel.getRangeAt(0);
-            if (!range.collapsed) return null;
-            const node = range.startContainer;
-            if (!node) return null;
-
-            // Case A: caret is inside our marker subtree — walk up looking
-            // for `.bt-marker`. Any ancestor match means "forward me out".
-            let a = node.nodeType === 1 ? node : node.parentNode;
-            while (a && a !== document.body) {
-                if (a.classList && a.classList.contains('bt-marker')) {
-                    const li = a.closest('.listitem');
-                    if (li && (!preferredLi || li === preferredLi)) return li;
-                    return null;
-                }
-                // Stop climbing once we hit the listitem (case B/C checks
-                // below handle the container=listitem / text-node-sibling
-                // cases explicitly).
-                if (a.classList && a.classList.contains('listitem')) break;
-                a = a.parentNode;
-            }
-
-            // Case B: startContainer is the .listitem itself and the offset
-            // is at-or-before our marker's index.
-            if (node.nodeType === 1 && node.classList
-                && node.classList.contains('listitem')) {
-                if (preferredLi && node !== preferredLi) return null;
-                const kids = node.children;
-                let markerIdx = -1;
-                for (let i = 0; i < kids.length; i++) {
-                    if (kids[i].classList && kids[i].classList.contains('bt-marker')) {
-                        markerIdx = i;
-                        break;
-                    }
-                }
-                if (markerIdx === -1) return null;
-                // startOffset is relative to childNodes (NOT children) —
-                // clamp using min since text nodes can shift the child index
-                // but not by much on a fresh row. A conservative "<= markerIdx"
-                // covers the typical post-Enter state.
-                if (range.startOffset <= markerIdx) return node;
-                return null;
-            }
-
-            // Case C: startContainer is a text node whose parent is the
-            // listitem and it sits before our marker in childNodes order.
-            if (node.nodeType === 3 && node.parentNode
-                && node.parentNode.classList
-                && node.parentNode.classList.contains('listitem')) {
-                const li = node.parentNode;
-                if (preferredLi && li !== preferredLi) return null;
-                const marker = li.querySelector(':scope > .bt-marker');
-                if (!marker) return null;
-                // compareDocumentPosition returns FOLLOWING (0x04) when
-                // `marker` comes AFTER `node` — i.e. node is pre-marker.
-                if (node.compareDocumentPosition(marker)
-                    & Node.DOCUMENT_POSITION_FOLLOWING) return li;
-                return null;
-            }
-
-            return null;
-        };
-
-        // Build a Range collapsed to the caret position we want: first text
-        // offset inside the row's .line-div, skipping past any non-editable
-        // indent-carrier wrappers (task checkbox, ulist bullet, olist number).
-        const findEditableCaretAnchor = (li) => {
-            if (!li) return null;
-            const marker = li.querySelector(':scope > .bt-marker');
-            if (!marker) return null;
-            // Walk siblings forward until we land on `.line-div`. Skip
-            // known non-editable columns; if we walk off the end without
-            // finding one, fall back to the first non-marker sibling.
-            let target = marker.nextElementSibling;
-            let fallback = target;
-            while (target) {
-                if (target.classList && target.classList.contains('line-div')) break;
-                if (target.classList && (
-                    target.classList.contains('line-check-div')
-                    || target.classList.contains('line-bullet-div')
-                    || target.classList.contains('line-number-div'))) {
-                    target = target.nextElementSibling;
-                    continue;
-                }
-                break; // unknown sibling — use as-is
-            }
-            if (!target) target = fallback;
-            if (!target) return null;
-
-            const r = document.createRange();
-            // Prefer the first text node inside the target so the caret
-            // sits at a real editable position (rather than between element
-            // children, which some browsers render visually off by a pixel).
-            const firstText = (() => {
-                const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT, null);
-                return walker.nextNode();
-            })();
-            if (firstText) {
-                r.setStart(firstText, 0);
-                r.collapse(true);
-            } else {
-                r.selectNodeContents(target);
-                r.collapse(true);
-            }
-            return r;
-        };
-
         const forwardCursorPastMarker = (li) => {
             if (cursorForwardBusy) return;
             const sel = window.getSelection && window.getSelection();
             if (!sel || !sel.rangeCount) return;
-            const owner = caretIsPreMarker(sel, li);
-            if (!owner) return;
-            const newRange = findEditableCaretAnchor(owner);
-            if (!newRange) return;
+            const range = sel.getRangeAt(0);
+            if (!range.collapsed) return;
+            if (range.startOffset !== 0) return;
+            const node = range.startContainer;
+            if (!node || node.nodeType !== 1) return;
+            // If a specific li was passed, only act when that's the container.
+            if (li && node !== li) return;
+            if (!node.classList || !node.classList.contains('listitem')) return;
+            const marker = node.firstElementChild;
+            if (!marker || !marker.classList.contains('bt-marker')) return;
+            const target = marker.nextElementSibling;
+            if (!target) return;
             cursorForwardBusy = true;
             try {
+                const newRange = document.createRange();
+                newRange.selectNodeContents(target);
+                newRange.collapse(true);
                 sel.removeAllRanges();
                 sel.addRange(newRange);
             } finally {
@@ -1771,21 +1653,14 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             // The caret may have been sitting at listitem offset 0 just
             // before the insert (newly-created empty row case). After the
             // insert, offset 0 now points before our marker. Forward it.
-            //
-            // Retry ladder: Thymer's post-Enter caret-placement pass runs
-            // on an unpredictable tick (synchronous, microtask, or one of
-            // the next couple of rAFs depending on row type and how the
-            // keystroke was produced). Each step is a no-op when the caret
-            // is already in a safe position (see caretIsPreMarker), so the
-            // ladder is cheap when not needed. See
-            // /Users/anish/.windsurf/plans/enter-caret-fix-34570a.md.
             forwardCursorPastMarker(li);
-            queueMicrotask(() => forwardCursorPastMarker(li));
-            requestAnimationFrame(() => {
-                forwardCursorPastMarker(li);
-                requestAnimationFrame(() => forwardCursorPastMarker(li));
-            });
-            setTimeout(() => forwardCursorPastMarker(li), 0);
+            // Retry on the next frame: Thymer sometimes re-anchors the
+            // selection back to listitem[0] after we forward it (post-Enter
+            // cursor placement runs on its own rAF). Retrying once after
+            // Thymer's pass settles catches that race. The cursorForwardBusy
+            // guard inside the helper prevents unnecessary work if the
+            // cursor has already moved somewhere valid.
+            requestAnimationFrame(() => forwardCursorPastMarker(li));
         };
 
         // Remove our marker and restore the marginLeft to the native child
@@ -3643,23 +3518,6 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             document.removeEventListener('selectionchange', onSelectionChange);
         });
 
-        // `beforeinput` safety net — capture phase on the editor container.
-        // When the user starts typing after Enter and Thymer's post-Enter
-        // caret placement has re-anchored the caret to a pre-marker
-        // position (symptom #2 in the plan), this runs BEFORE the
-        // character is inserted and forwards the caret so the char lands
-        // inside .line-div rather than creating a stray text node as a
-        // sibling of .bt-marker. Cheap no-op when the caret is already
-        // safe (caretIsPreMarker returns null).
-        const onBeforeInput = () => {
-            if (!isEnabled || (!isTogglesEnabled && !isBulletsEnabled)) return;
-            forwardCursorPastMarker();
-        };
-        editorContainer.addEventListener('beforeinput', onBeforeInput, true);
-        this.cleanupMethods.push(() => {
-            editorContainer.removeEventListener('beforeinput', onBeforeInput, true);
-        });
-
         // Line-item created hook: when a new line is created while zoomed
         // and it's not under the zoom subtree, move it under the zoom root
         // so Enter-to-create works correctly inside a zoom.
@@ -3706,37 +3564,6 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             this.cleanupMethods.push(() => {
                 if (typeof this.off === 'function') {
                     try { this.off('lineitem.created', handleLineItemCreatedForZoom); } catch {}
-                }
-            });
-        }
-
-        // Post-creation caret forward: our MutationObserver-triggered
-        // `injectMarker` runs a retry ladder that covers most Enter
-        // races, but Thymer's `lineitem.created` SDK event sometimes
-        // fires AFTER its own post-Enter caret placement settles. This
-        // handler resolves the new row's .listitem by guid and runs one
-        // more no-op-when-safe forward on the next rAF, catching the
-        // last slice of the race window.
-        const handleLineItemCreatedForCaret = (ev) => {
-            if (!ev || ev.eventName !== 'lineitem.created') return;
-            if (!isEnabled || (!isTogglesEnabled && !isBulletsEnabled)) return;
-            const guid = ev.lineItemGuid;
-            if (!guid) return;
-            // Resolve DOM element synchronously via data-guid (Thymer
-            // stamps this onto .listitem). Fall back to a rAF in case
-            // the node hasn't been rendered yet at event-fire time.
-            const tryOnce = () => {
-                const li = document.querySelector(`.listitem[data-guid="${CSS.escape(guid)}"]`);
-                if (li) forwardCursorPastMarker(li);
-            };
-            tryOnce();
-            requestAnimationFrame(tryOnce);
-        };
-        if (typeof this.on === 'function') {
-            this.on('lineitem.created', handleLineItemCreatedForCaret);
-            this.cleanupMethods.push(() => {
-                if (typeof this.off === 'function') {
-                    try { this.off('lineitem.created', handleLineItemCreatedForCaret); } catch {}
                 }
             });
         }
