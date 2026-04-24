@@ -320,18 +320,6 @@ body.ir-enabled .listitem-olist .listitem-indentline {
     min-height: 20px !important;
 }
 
-/* Leaf rows (no children — i.e. no .bt-has-children class) whose text
-   wraps over multiple visual lines get a very short indentline from
-   Thymer by default (it's sized to span descendants, of which leaves
-   have none). Force the indentline to fill its .line-div so wrapped
-   leaf rows still show a continuous guide at their own indent level.
-   Non-leaf rows already extend their indentline beyond their line-div
-   to reach descendants, and min-height:100% cannot shrink them. */
-body.ir-enabled .listitem:not(.bt-has-children) .line-div > .listitem-indentline {
-    min-height: 100% !important;
-    height: auto !important;
-}
-
 /* Global horizontal nudge (~1pt) so guides sit centered under bullets/numbers/
    checkboxes. Applied uniformly across all item types (including headings,
    which lack the listitem-text/task/ulist/olist classes) so per-level
