@@ -597,6 +597,16 @@ body.ir-enabled .bt-caret {
 body.ir-enabled.bt-toggles .bt-marker > .bt-caret {
     display: inline-grid;
     place-items: center;
+    /* Match Thymer's native link-menu action buttons: vertical padding
+       enlarges the bounding box (so the tooltip, anchored at the top
+       edge, sits the same 14.5pt above the glyph as the native
+       tooltip does above its button), while
+       negative margin cancels the layout impact so the row metrics
+       don't shift. Horizontal padding is intentionally smaller than
+       native (native uses 5px which spans a wider hit-zone that would
+       overlap our bullet in both-on mode). */
+    padding: 10px 0 !important;
+    margin: -10px 0 !important;
 }
 /* Force the Tabler ::before glyph to render as a zero-metrics block so
    its em-box is collapsed; grid's place-items then centers the glyph
@@ -627,6 +637,11 @@ body.ir-enabled .bt-bullet {
 
 body.ir-enabled.bt-bullets .bt-marker > .bt-bullet {
     display: inline-flex;
+    /* See .bt-caret comment above — match native link-menu-action-zoom
+       vertical bbox so Thymer's tooltip anchors 14.5pt above the
+       bullet rather than tight against it. */
+    padding: 10px 0 !important;
+    margin: -10px 0 !important;
 }
 
 /* --bt-bullet-fill is the effective color used for the bullet's solid dot,
