@@ -3470,25 +3470,41 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         // overlay is still up it intercepts those events and the fold
         // no-ops. 50ms is enough for Thymer's palette close animation;
         // any remaining ms overlap is invisible to the user.
-        const runBulkDeferred = (fn, emptyMsg) => setTimeout(() => {
-            if (this.isUnloaded) return;
-            const n = fn();
-            if (n === 0 && this.ui && typeof this.ui.showToaster === 'function') {
-                this.ui.showToaster({ message: emptyMsg, duration: 1500 });
-            }
-        }, 50);
+        const runBulkDeferred = (fn, emptyMsg, label) => {
+            // Unconditional log so we can see in the console whether the
+            // command is actually firing. Remove once confirmed working.
+            console.log('[ir-fold] command fired:', label);
+            setTimeout(() => {
+                if (this.isUnloaded) return;
+                try {
+                    const editor = document.querySelector(EDITOR_SELECTORS);
+                    const rowCount = editor
+                        ? editor.querySelectorAll('.listitem[data-guid]').length
+                        : 0;
+                    console.log('[ir-fold] editor found:', !!editor,
+                        '; rows with data-guid:', rowCount);
+                    const n = fn();
+                    console.log('[ir-fold]', label, 'queued', n, 'row(s)');
+                    if (n === 0 && this.ui && typeof this.ui.showToaster === 'function') {
+                        this.ui.showToaster({ message: emptyMsg, duration: 1500 });
+                    }
+                } catch (e) {
+                    console.error('[ir-fold] bulk command threw:', e);
+                }
+            }, 50);
+        };
         this.ui.addCommandPaletteCommand({
             label: "Fold All on this page",
             icon: "chevron-right",
             onSelected: () => runBulkDeferred(
-                foldAllOnPage, 'Nothing to fold on this page'
+                foldAllOnPage, 'Nothing to fold on this page', 'Fold All'
             )
         });
         this.ui.addCommandPaletteCommand({
             label: "Unfold All on this page",
             icon: "chevron-down",
             onSelected: () => runBulkDeferred(
-                unfoldAllOnPage, 'Nothing to unfold on this page'
+                unfoldAllOnPage, 'Nothing to unfold on this page', 'Unfold All'
             )
         });
 
