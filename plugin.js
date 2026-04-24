@@ -555,6 +555,24 @@ body.ir-enabled .listitem:not(.listitem-text):not(.listitem-task):not(.listitem-
     transform: none;
 }
 
+/* Embed rows (image cards, link previews, video/iframe embeds,
+   attachments) also lack the text/task/ulist/olist classes, so the
+   heading-center rule above catches them. With a tall embed, the
+   marker + hover frame end up at the vertical midpoint of the
+   whole card instead of on the first-line area where the user
+   expects to click for fold/drag. Detect any row that contains an
+   <img>/<video>/<iframe> descendant and restore the default
+   first-line baseline behavior from the main .bt-marker rule. */
+body.ir-enabled .listitem:has(img) > .bt-marker,
+body.ir-enabled .listitem:has(video) > .bt-marker,
+body.ir-enabled .listitem:has(iframe) > .bt-marker,
+body.ir-enabled .listitem:has(picture) > .bt-marker,
+body.ir-enabled .listitem:has(canvas) > .bt-marker {
+    align-self: baseline;
+    vertical-align: baseline;
+    transform: translateY(var(--bt-marker-nudge));
+}
+
 /* Knockout disc behind the caret and bullet so the rainbow active-thread
    arm visually passes BEHIND the marker and resumes on the other side,
    instead of cutting through the chevron glyph or parent-bullet ring.
