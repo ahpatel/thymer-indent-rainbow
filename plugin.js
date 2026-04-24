@@ -1566,7 +1566,10 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         };
 
         // Remove our marker and restore the marginLeft to the native child
-        // whose class we remembered when we transferred from it.
+        // whose class we remembered when we transferred from it. Falls back
+        // to a looser match if Thymer mutated that child's classList between
+        // inject and remove — otherwise the margin is silently destroyed
+        // along with .bt-marker and the row loses its indent.
         const removeMarker = (li) => {
             if (!li) return;
             const marker = li.firstElementChild;
@@ -1574,15 +1577,52 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             const restoredTo = marker.dataset.btFromClass;
             const ml = marker.style.marginLeft;
             outlineMutating = true;
-            if (ml && restoredTo) {
-                // Restore to the first matching-class child if it's still there.
-                for (let i = 1; i < li.children.length; i++) {
-                    const c = li.children[i];
-                    if (c.className === restoredTo) {
-                        c.style.marginLeft = ml;
-                        break;
+            if (ml) {
+                let restored = false;
+                // Fast path: exact className match (Thymer hasn't touched
+                // the original carrier's classList since inject).
+                if (restoredTo) {
+                    for (let i = 1; i < li.children.length; i++) {
+                        const c = li.children[i];
+                        if (c.className === restoredTo) {
+                            c.style.marginLeft = ml;
+                            restored = true;
+                            break;
+                        }
                     }
                 }
+                // Fallback 1: any known indent-carrier child (matches the
+                // same class set injectMarker's transfer loop considers).
+                if (!restored) {
+                    for (let i = 1; i < li.children.length; i++) {
+                        const c = li.children[i];
+                        if (!c.classList) continue;
+                        if (c.classList.contains('line-check-div')
+                            || c.classList.contains('line-bullet-div')
+                            || c.classList.contains('line-number-div')
+                            || c.classList.contains('line-div')) {
+                            c.style.marginLeft = ml;
+                            restored = true;
+                            break;
+                        }
+                    }
+                }
+                // Fallback 2: first non-marker child — guarantees the
+                // margin survives the marker removal even if Thymer
+                // swapped in a carrier we don't recognize.
+                if (!restored) {
+                    for (let i = 1; i < li.children.length; i++) {
+                        const c = li.children[i];
+                        if (c.style) {
+                            c.style.marginLeft = ml;
+                            restored = true;
+                            break;
+                        }
+                    }
+                }
+                // Last-ditch: pin it to the listitem itself so indentation
+                // is preserved even on a weird row with no usable child.
+                if (!restored) li.style.marginLeft = ml;
             }
             marker.remove();
             outlineMutating = false;
