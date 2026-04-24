@@ -104,6 +104,7 @@ class Plugin extends AppPlugin {
         const BULLET_COLOR_MODE_KEY = 'indent-rainbow-bullet-color-mode';
         const HOVER_FRAME_KEY = 'indent-rainbow-hover-frame';
         const REMEMBER_FOLDS_KEY = 'indent-rainbow-remember-folds';
+        const HIDE_EMPTY_MARKERS_KEY = 'indent-rainbow-hide-empty-markers';
         // Global set of lineItem guids that the user has collapsed.
         // Single key; guids are globally unique across records, so per-record
         // keying isn't needed.
@@ -274,6 +275,7 @@ class Plugin extends AppPlugin {
         let isTogglesEnabled = localStorage.getItem(TOGGLES_ENABLED_KEY) !== 'false'; // default true
         let isHoverFrameEnabled = localStorage.getItem(HOVER_FRAME_KEY) !== 'false'; // default true
         let isRememberFoldsEnabled = localStorage.getItem(REMEMBER_FOLDS_KEY) !== 'false'; // default true
+        let isHideEmptyMarkersEnabled = localStorage.getItem(HIDE_EMPTY_MARKERS_KEY) !== 'false'; // default true
         // Tri-state bullet color mode — 'neutral' | 'hover' | 'always'.
         // Default 'always' so new installs see rainbow-colored bullets; existing
         // users with nothing persisted get the same default on first load.
@@ -1069,6 +1071,19 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         margin: -8px -6px;
     }
 }
+
+/* ---------- Hide markers on blank lines ----------
+   When body.ir-hide-empty-markers is active, any .listitem tagged
+   with .bt-empty (written by colorIndentLine when the row's text
+   content is blank) hides its bullet and fold caret. visibility:
+   hidden (not display: none) keeps the marker slot occupied so
+   layout doesn't jump the moment the user types the first
+   character. The hover frame is unaffected — on blank rows users
+   can still see the drag/fold affordance on hover. */
+body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty > .bt-marker > .bt-bullet,
+body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty > .bt-marker > .bt-caret {
+    visibility: hidden;
+}
 `;
 
         // Write the palette for the current scheme as --ir-level-N root vars.
@@ -1090,6 +1105,7 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             // padding, a leftover border, or our own display: block
             // !important override keep a sliver visible.
             document.body.classList.toggle('ir-guides-hidden', currentWidth === 0);
+            document.body.classList.toggle('ir-hide-empty-markers', isHideEmptyMarkersEnabled);
         };
 
         // Persist settings to localStorage (only called on user change).
@@ -1105,6 +1121,7 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             localStorage.setItem(BULLET_COLOR_MODE_KEY, bulletColorMode);
             localStorage.setItem(HOVER_FRAME_KEY, isHoverFrameEnabled);
             localStorage.setItem(REMEMBER_FOLDS_KEY, isRememberFoldsEnabled);
+            localStorage.setItem(HIDE_EMPTY_MARKERS_KEY, isHideEmptyMarkersEnabled);
         };
 
         // Toggle the ir-enabled body class which gates all our CSS rules.
@@ -1605,25 +1622,47 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             const levelVar = `var(--ir-level-${level})`;
             item.style.setProperty('--bt-bullet-color', levelVar);
 
-            const indentLine = item.querySelector('.listitem-indentline');
-            if (!indentLine) return;
-
-            const lineDiv = item.querySelector('.line-div');
-            // S2: zero-alloc empty-check. Walk childNodes directly instead
-            // of Array.from(...).some(...) which allocates per call.
+            // Compute emptiness BEFORE the indent-line early-return. Blank
+            // rows frequently have no .listitem-indentline at all (Thymer
+            // strips it on empty content), and we still need to tag the
+            // listitem with .bt-empty so the hide-empty-markers CSS works.
+            //
+            // Scope: when a .line-div exists, walk only its direct own
+            // content \u2014 skip our own injected children and anything that
+            // looks like a nested sub-row wrapper so a parent with blank
+            // text but non-empty descendants still registers as empty.
+            const lineDiv = item.querySelector(':scope > .line-div');
             let isEmpty;
             if (lineDiv) {
                 isEmpty = true;
                 for (const n of lineDiv.childNodes) {
                     if (n.nodeType === 1 && n.classList
                         && (n.classList.contains('listitem-indentline')
-                            || n.classList.contains('bt-active-highlight'))) continue;
+                            || n.classList.contains('bt-active-highlight')
+                            || n.classList.contains('bt-marker'))) continue;
                     const txt = n.textContent;
                     if (txt && txt.trim().length > 0) { isEmpty = false; break; }
                 }
             } else {
-                isEmpty = !(item.textContent || '').trim();
+                // Fallback: no .line-div. Use the item's own directly-owned
+                // text nodes only \u2014 don't recurse into nested listitems so
+                // a parent with blank text but child rows stays "empty".
+                isEmpty = true;
+                for (const n of item.childNodes) {
+                    if (n.nodeType === 3) {
+                        if ((n.nodeValue || '').trim().length > 0) { isEmpty = false; break; }
+                    }
+                }
             }
+
+            // Mirror the empty-state onto the listitem so CSS under
+            // body.ir-hide-empty-markers can hide .bt-bullet / .bt-caret
+            // on blank rows while keeping .bt-marker's layout slot
+            // reserved (visibility: hidden, not display: none).
+            item.classList.toggle('bt-empty', isEmpty);
+
+            const indentLine = item.querySelector('.listitem-indentline');
+            if (!indentLine) return;
 
             if (isEmpty) {
                 indentLine.style.setProperty('display', 'none', 'important');
@@ -1645,6 +1684,11 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
                 delete line.dataset.btManaged;
                 delete line.dataset.btEmpty;
             }
+            // Strip the bt-empty class we set in colorIndentLine so a
+            // disabled plugin doesn't leave stale state on rows.
+            document.querySelectorAll('.listitem.bt-empty').forEach(el => {
+                el.classList.remove('bt-empty');
+            });
             // Also clear the bullet-color var from any listitems we wrote it onto.
             const items = document.querySelectorAll('.listitem');
             for (const it of items) {
@@ -3828,6 +3872,9 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
                     saveFoldedSetImmediate();
                 }
             }
+            if (newSettings.isHideEmptyMarkersEnabled !== undefined) {
+                isHideEmptyMarkersEnabled = !!newSettings.isHideEmptyMarkersEnabled;
+            }
             if (newSettings.bulletColorMode !== undefined
                 && (newSettings.bulletColorMode === 'neutral'
                     || newSettings.bulletColorMode === 'hover'
@@ -3872,7 +3919,7 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
                     currentScheme, currentWidth, activeWidth, currentOpacity,
                     isEnabled, threadingMode, isBulletsEnabled, isTogglesEnabled,
                     bulletColorMode, isHoverFrameEnabled,
-                    isRememberFoldsEnabled
+                    isRememberFoldsEnabled, isHideEmptyMarkersEnabled
                 }),
                 updateSettings,
                 createIcon: (name) => this.ui.createIcon(name)
@@ -4761,6 +4808,20 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             'Remember Collapse State',
             'Restore your collapsed rows after page navigation or reload. Persists per-row (by lineItem id) in local storage.',
             rememberFoldsCheckbox
+        ));
+
+        const hideEmptyMarkersCheckbox = document.createElement('input');
+        hideEmptyMarkersCheckbox.type = 'checkbox';
+        hideEmptyMarkersCheckbox.className = 'ir-checkbox';
+        hideEmptyMarkersCheckbox.checked = !!currentSettings.isHideEmptyMarkersEnabled;
+        hideEmptyMarkersCheckbox.addEventListener('change', (e) => {
+            currentSettings.isHideEmptyMarkersEnabled = e.target.checked;
+            api.updateSettings({ isHideEmptyMarkersEnabled: e.target.checked });
+        });
+        outlineCard.appendChild(createField(
+            'Hide Markers on Blank Lines',
+            'Hide the bullet and fold chevron on rows with no text. The marker slot stays reserved so layout does not shift when you start typing.',
+            hideEmptyMarkersCheckbox
         ));
 
         container.appendChild(outlineCard);
