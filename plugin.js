@@ -1001,6 +1001,69 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
     filter: none !important;
     border: none !important;
 }
+
+/* ---------- Touch / mobile safety ----------
+   Scoped strictly behind @media (hover: none) / (pointer: coarse) so
+   desktop + hybrid mouse-equipped touchscreens are unaffected. These
+   rules address three mobile-specific issues:
+
+   1. Sticky :hover after tap. Mobile browsers apply :hover to the last
+      tapped element until the user taps somewhere else. Our hover
+      frame (a dark rectangle painted via .bt-marker::before) and the
+      indentline brightness bumps therefore get stuck. Suppress them
+      outright on no-hover devices so taps don't leave visual residue.
+
+   2. Tap targets. .bt-caret (18x18) and .bt-bullet (16x16) are well
+      below Apple HIG (44x44) and Material (48x48) minimums. Expand
+      their hit-zone on coarse pointers via transparent padding +
+      compensating negative margin so layout is unchanged but the
+      tappable box reaches ~32px in the inline axis.
+
+   3. Bullet-color "hover" mode is inert on touch (the trigger never
+      fires). Fall back to the "always" behavior so users who picked
+      Hover on desktop still get colored bullets when they pick up
+      the same workspace on a phone / tablet. */
+@media (hover: none) {
+    /* Suppress the hover frame + brightness hovers that would
+       otherwise stick after a tap. */
+    body.ir-enabled.bt-bullets.bt-toggles.ir-hover-frame .listitem:hover > .bt-marker::before {
+        background: transparent !important;
+        border-color: transparent !important;
+    }
+    body.ir-enabled .listitem:hover > .line-div > .listitem-indentline,
+    body.ir-enabled .listitem:hover > .line-check-div ~ .line-div > .listitem-indentline,
+    body.ir-enabled .listitem:hover > .line-bullet-div ~ .line-div > .listitem-indentline,
+    body.ir-enabled .listitem:hover > .line-number-div ~ .line-div > .listitem-indentline {
+        opacity: var(--bt-line-opacity) !important;
+        filter: none !important;
+    }
+    body.ir-enabled .listitem:hover .line-div .listitem-indentline {
+        filter: none;
+    }
+    body.ir-enabled.bt-toggles .listitem.bt-has-children > .bt-marker > .bt-caret:hover {
+        opacity: 0.55;
+    }
+    body.ir-enabled .bt-bullet:hover::after {
+        opacity: 0.75;
+        border-color: rgba(128, 128, 128, 0.55);
+        transform: none;
+    }
+    /* "Hover" bullet-color mode has no trigger on touch. Fall back to
+       the "always" behavior so users still get colored bullets. */
+    body.ir-enabled.ir-bullets-hover .bt-bullet {
+        --bt-bullet-fill: var(--bt-bullet-color, currentColor);
+    }
+}
+
+@media (pointer: coarse) {
+    /* Expand tap targets without shifting layout. Padding grows the
+       hit-zone; compensating negative margin cancels the space change. */
+    body.ir-enabled .bt-caret,
+    body.ir-enabled .bt-bullet {
+        padding: 8px 6px;
+        margin: -8px -6px;
+    }
+}
 `;
 
         // Write the palette for the current scheme as --ir-level-N root vars.
