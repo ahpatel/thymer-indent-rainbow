@@ -2417,21 +2417,6 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             // Thymer doesn't always expose it on every listitem.
             const editor = document.querySelector(EDITOR_SELECTORS) || document.body;
             const all = Array.from(editor.querySelectorAll('.listitem'));
-            const targets = all.filter(li => {
-                if (!li.isConnected) return false;
-                const isFolded = li.classList.contains('listitem-folded');
-                if (shouldCollapse) {
-                    // Fold: only rows that have children and aren't folded.
-                    return li.classList.contains('bt-has-children') && !isFolded;
-                }
-                // Unfold: only rows that ARE folded.
-                return isFolded;
-            });
-            if (targets.length === 0) return 0;
-            // Fold deepest-first (defensive — so parent collapses don't
-            // change what Thymer considers "the row" under our cursor).
-            // Unfold shallowest-first so the containing tree opens up
-            // top-down, reducing perceived re-flow churn.
             const depth = (li) => {
                 let d = 0, cur = li.parentElement;
                 while (cur && cur !== editor) {
@@ -2440,7 +2425,31 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
                 }
                 return d;
             };
-            targets.sort((a, b) => shouldCollapse ? depth(b) - depth(a) : depth(a) - depth(b));
+            const targets = all.filter(li => {
+                if (!li.isConnected) return false;
+                const isFolded = li.classList.contains('listitem-folded');
+                if (shouldCollapse) {
+                    // Fold: only TOP-LEVEL rows that have children and
+                    // aren't folded. Folding the outermost bullet
+                    // implicitly hides every descendant, so we get full
+                    // page-collapse without having to individually fold
+                    // every nested parent. Matches the Workflowy
+                    // convention and keeps the visual result minimal.
+                    return depth(li) === 0
+                        && li.classList.contains('bt-has-children')
+                        && !isFolded;
+                }
+                // Unfold: every folded row on the page so the tree fully
+                // opens, regardless of depth.
+                return isFolded;
+            });
+            if (targets.length === 0) return 0;
+            // Fold: top-level only, order doesn't matter (all are siblings).
+            // Unfold shallowest-first so the containing tree opens up
+            // top-down, reducing perceived re-flow churn.
+            if (!shouldCollapse) {
+                targets.sort((a, b) => depth(a) - depth(b));
+            }
 
             const snap = snapshotSelection();
             let i = 0;
@@ -3476,58 +3485,27 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         // overlay is still up it intercepts those events and the fold
         // no-ops. 50ms is enough for Thymer's palette close animation;
         // any remaining ms overlap is invisible to the user.
-        // TEMP diagnostic: toaster every step so we can see on-screen
-        // exactly where the bulk-fold flow breaks, without DevTools.
-        const toast = (msg) => {
-            try {
-                if (this.ui && typeof this.ui.showToaster === 'function') {
-                    this.ui.showToaster({ message: msg, duration: 2000 });
-                } else if (this.ui && typeof this.ui.addToaster === 'function') {
-                    this.ui.addToaster({ title: msg, dismissible: true, autoDestroyTime: 2000 });
-                }
-            } catch (_) {}
-        };
-        const runBulkDeferred = (fn, emptyMsg, label) => {
-            toast(`[ir-fold] ${label}: onSelected fired`);
-            console.log('[ir-fold] command fired:', label);
-            setTimeout(() => {
-                if (this.isUnloaded) { toast('[ir-fold] plugin unloaded'); return; }
-                try {
-                    const editor = document.querySelector(EDITOR_SELECTORS);
-                    const rowCount = editor
-                        ? editor.querySelectorAll('.listitem[data-guid]').length
-                        : 0;
-                    toast(`[ir-fold] editor:${!!editor} rows:${rowCount}`);
-                    console.log('[ir-fold] editor found:', !!editor,
-                        '; rows with data-guid:', rowCount);
-                    const n = fn();
-                    toast(`[ir-fold] ${label}: queued ${n} row(s)`);
-                    console.log('[ir-fold]', label, 'queued', n, 'row(s)');
-                } catch (e) {
-                    toast(`[ir-fold] ERROR: ${e && e.message ? e.message : e}`);
-                    console.error('[ir-fold] bulk command threw:', e);
-                }
-            }, 50);
-        };
+        const runBulkDeferred = (fn, emptyMsg) => setTimeout(() => {
+            if (this.isUnloaded) return;
+            const n = fn();
+            if (n === 0 && this.ui && typeof this.ui.showToaster === 'function') {
+                this.ui.showToaster({ message: emptyMsg, duration: 1500 });
+            }
+        }, 50);
         this.ui.addCommandPaletteCommand({
             label: "Fold All on this page",
             icon: "chevron-right",
             onSelected: () => runBulkDeferred(
-                foldAllOnPage, 'Nothing to fold on this page', 'Fold All'
+                foldAllOnPage, 'Nothing to fold on this page'
             )
         });
         this.ui.addCommandPaletteCommand({
             label: "Unfold All on this page",
             icon: "chevron-down",
             onSelected: () => runBulkDeferred(
-                unfoldAllOnPage, 'Nothing to unfold on this page', 'Unfold All'
+                unfoldAllOnPage, 'Nothing to unfold on this page'
             )
         });
-
-        // Temporary load marker so we can verify the new plugin code
-        // is actually running after a reload. Remove once bulk fold is
-        // confirmed working.
-        console.log('[ir-fold] plugin loaded (build 7767497+) — bulk fold commands registered');
 
     }
 
