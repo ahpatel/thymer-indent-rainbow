@@ -240,8 +240,11 @@ class Plugin extends AppPlugin {
         // the settings-panel slider range); opacity is 0..1.
         let currentWidth = clampNum(
             parseInt(localStorage.getItem(WIDTH_KEY), 10), 0, 4, 1);
+        // activeWidth supports fractional values (0.5 step) so users can
+        // pick a hairline-thin focus highlight. clampNum uses Number()
+        // which preserves the fraction.
         let activeWidth = clampNum(
-            parseInt(localStorage.getItem(ACTIVE_WIDTH_KEY), 10), 0, 4, 2);
+            parseFloat(localStorage.getItem(ACTIVE_WIDTH_KEY)), 0, 4, 2);
         let currentOpacity = clampNum(
             parseFloat(localStorage.getItem(OPACITY_KEY)), 0, 1, 0.3);
 
@@ -3695,7 +3698,7 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
                 currentWidth = clampNum(parseInt(newSettings.currentWidth, 10), 0, 4, currentWidth);
             }
             if (newSettings.activeWidth !== undefined) {
-                activeWidth = clampNum(parseInt(newSettings.activeWidth, 10), 0, 4, activeWidth);
+                activeWidth = clampNum(parseFloat(newSettings.activeWidth), 0, 4, activeWidth);
             }
             if (newSettings.currentOpacity !== undefined) {
                 currentOpacity = clampNum(parseFloat(newSettings.currentOpacity), 0, 1, currentOpacity);
@@ -4357,7 +4360,7 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             }
 
             // Draw active threading arm(s) from row 0/1/2 down to row 3
-            const activeWidth = Math.max(0, parseInt(s.activeWidth, 10));
+            const activeWidth = Math.max(0, parseFloat(s.activeWidth));
             if (activeWidth > 0) {
                 const deepIdx = PREVIEW_ROWS - 1;
                 const deepTop = deepIdx * ROW_H + Math.floor((116 - PREVIEW_ROWS * ROW_H) / 2);
@@ -4533,10 +4536,12 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         aWidthSlider.className = 'ir-range';
         aWidthSlider.min = '0';
         aWidthSlider.max = '4';
-        aWidthSlider.step = '1';
+        // 0.5 step allows a hairline-thin active highlight (the only
+        // width with sub-pixel steps; currentWidth remains integer).
+        aWidthSlider.step = '0.5';
         aWidthSlider.value = currentSettings.activeWidth;
         aWidthSlider.addEventListener('input', (e) => {
-            currentSettings.activeWidth = parseInt(e.target.value, 10);
+            currentSettings.activeWidth = parseFloat(e.target.value);
             aWidthVal.textContent = formatWidthValue(currentSettings.activeWidth);
             api.updateSettings({ activeWidth: e.target.value });
             renderPreview(currentSettings);
