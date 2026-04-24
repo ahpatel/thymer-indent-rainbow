@@ -2417,49 +2417,54 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             // Thymer doesn't always expose it on every listitem.
             const editor = document.querySelector(EDITOR_SELECTORS) || document.body;
             const all = Array.from(editor.querySelectorAll('.listitem'));
-            const depth = (li) => {
-                let d = 0, cur = li.parentElement;
-                while (cur && cur !== editor) {
-                    if (cur.classList && cur.classList.contains('listitem')) d++;
-                    cur = cur.parentElement;
-                }
-                return d;
-            };
-            // "Has children" detection — don't rely on our own
-            // bt-has-children class, which is applied by our outline pass
-            // and may not be present on every row (or on top-level rows
-            // at all in the current Thymer build). Instead look at the
-            // DOM: any row that contains a descendant .listitem has
-            // children, structurally. We also treat listitem-folded as
-            // a positive signal (it can't be folded without having
-            // something to hide).
-            const hasChildren = (li) =>
-                !!li.querySelector('.listitem') ||
-                li.classList.contains('listitem-folded') ||
-                li.classList.contains('bt-has-children');
-            const targets = all.filter(li => {
-                if (!li.isConnected) return false;
+            if (all.length === 0) return 0;
+
+            // Thymer's DOM is FLAT: all .listitem elements are siblings,
+            // and "nesting" is expressed via marginLeft on the marker.
+            // So depth is NOT the number of .listitem ancestors — it's
+            // the relative indent compared to the minimum indent on the
+            // current page. And a row "has children" iff the NEXT row in
+            // document order has strictly greater indent.
+            const indents = all.map(getItemIndent);
+            let minIndent = Infinity;
+            for (const v of indents) {
+                if (v < minIndent) minIndent = v;
+            }
+            if (!Number.isFinite(minIndent)) minIndent = 0;
+            const hasChildrenByOrder = new Array(all.length);
+            for (let i = 0; i < all.length; i++) {
+                const nextIndent = i + 1 < all.length ? indents[i + 1] : -Infinity;
+                let hc = nextIndent > indents[i];
+                // Folded rows hide their children from the DOM, so the
+                // "next row" heuristic under-counts. Treat folded as a
+                // positive signal regardless.
+                if (!hc && (all[i].classList.contains('listitem-folded')
+                    || all[i].classList.contains('bt-collapsed'))) hc = true;
+                hasChildrenByOrder[i] = hc;
+            }
+
+            const targets = [];
+            for (let i = 0; i < all.length; i++) {
+                const li = all[i];
+                if (!li.isConnected) continue;
                 const isFolded = li.classList.contains('listitem-folded');
                 if (shouldCollapse) {
-                    // Fold: only TOP-LEVEL rows that have children and
-                    // aren't folded. Folding the outermost bullet
-                    // implicitly hides every descendant, so we get full
-                    // page-collapse without having to individually fold
-                    // every nested parent. Matches the Workflowy
-                    // convention and keeps the visual result minimal.
-                    return depth(li) === 0 && hasChildren(li) && !isFolded;
+                    // Fold: only TOP-LEVEL rows (minimum indent on page)
+                    // that have children and aren't already folded.
+                    // Folding the outermost bullet implicitly hides every
+                    // descendant, so we collapse the page to its
+                    // outermost level with a single command.
+                    if (indents[i] === minIndent
+                        && hasChildrenByOrder[i]
+                        && !isFolded) {
+                        targets.push(li);
+                    }
+                } else if (isFolded) {
+                    // Unfold: every folded row on the page.
+                    targets.push(li);
                 }
-                // Unfold: every folded row on the page so the tree fully
-                // opens, regardless of depth.
-                return isFolded;
-            });
-            if (targets.length === 0) return 0;
-            // Fold: top-level only, order doesn't matter (all are siblings).
-            // Unfold shallowest-first so the containing tree opens up
-            // top-down, reducing perceived re-flow churn.
-            if (!shouldCollapse) {
-                targets.sort((a, b) => depth(a) - depth(b));
             }
+            if (targets.length === 0) return 0;
 
             const snap = snapshotSelection();
             let i = 0;
