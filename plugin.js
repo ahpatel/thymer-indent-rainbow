@@ -103,6 +103,14 @@ class Plugin extends AppPlugin {
         const TOGGLES_ENABLED_KEY = 'indent-rainbow-toggles-enabled';
         const BULLET_COLOR_MODE_KEY = 'indent-rainbow-bullet-color-mode';
         const HOVER_FRAME_KEY = 'indent-rainbow-hover-frame';
+        const REMEMBER_FOLDS_KEY = 'indent-rainbow-remember-folds';
+        // Global set of lineItem guids that the user has collapsed.
+        // Single key; guids are globally unique across records, so per-record
+        // keying isn't needed.
+        const FOLDED_SET_KEY = 'ir-folded-v1';
+        // Hidden debug flag — set localStorage['ir-folded-debug'] = '1' to
+        // get timing + warning logs during restore.
+        const FOLDED_DEBUG_KEY = 'ir-folded-debug';
 
         // Color schemes for different tastes
         const colorSchemes = {
@@ -244,6 +252,7 @@ class Plugin extends AppPlugin {
         let isBulletsEnabled = localStorage.getItem(BULLETS_ENABLED_KEY) !== 'false'; // default true
         let isTogglesEnabled = localStorage.getItem(TOGGLES_ENABLED_KEY) !== 'false'; // default true
         let isHoverFrameEnabled = localStorage.getItem(HOVER_FRAME_KEY) !== 'false'; // default true
+        let isRememberFoldsEnabled = localStorage.getItem(REMEMBER_FOLDS_KEY) !== 'false'; // default true
         // Tri-state bullet color mode — 'neutral' | 'hover' | 'always'.
         // Default 'always' so new installs see rainbow-colored bullets; existing
         // users with nothing persisted get the same default on first load.
@@ -492,7 +501,7 @@ body.ir-enabled.bt-bullets.bt-toggles .bt-marker::before {
        insets measured 3pt top / 6.5pt bottom because the marker's
        baseline-aligned box sits below the visible glyph center —
        shifting the rect up by 1.75pt recenters it on the glyphs. */
-    inset: -3.25pt -3pt -3.25pt -22pt;
+    inset: -3pt -3pt -3.25pt -22pt;
     border-radius: 4pt;
     background: transparent;
     border: 1px solid transparent;
@@ -817,7 +826,7 @@ body.ir-enabled.bt-bullets .item-drag-handle {
     /* -24px previously produced an 11pt gap between the circle and
        the chevron; +5pt rightward (≈ 6.67px) closes that gap to the
        intended 6pt, matching the chevron↔bullet spacing. */
-    left: calc(-24px - 2pt) !important;
+    left: calc(-24px - 3.25pt) !important;
     bottom: auto !important;
     /* Stack above .bt-marker (z-index: 11) so the both-on hover
        rectangle's opaque ::before (painted as part of bt-marker's
@@ -958,6 +967,7 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             localStorage.setItem(TOGGLES_ENABLED_KEY, isTogglesEnabled);
             localStorage.setItem(BULLET_COLOR_MODE_KEY, bulletColorMode);
             localStorage.setItem(HOVER_FRAME_KEY, isHoverFrameEnabled);
+            localStorage.setItem(REMEMBER_FOLDS_KEY, isRememberFoldsEnabled);
         };
 
         // Toggle the ir-enabled body class which gates all our CSS rules.
@@ -2087,6 +2097,276 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             });
         };
 
+        // =====================================================
+        // Persistent collapse state (v1)
+        //
+        // Remembers which rows the user has collapsed, keyed by lineItem
+        // guid (globally unique across records), and restores them after
+        // page navigation / full reload.
+        //
+        // Capture:  a dedicated MutationObserver watching `class` changes
+        //           on `.listitem[data-guid]` inside the editor. Diffs the
+        //           target's `listitem-folded` presence against a per-guid
+        //           `lastSeen` map; only updates the Set + triggers a
+        //           debounced save when the state actually flipped. The
+        //           observer is SEPARATE from the existing outline
+        //           observer (which only watches `style`) so unrelated
+        //           class churn (hover, bt-focused, bt-thread-parent, …)
+        //           stays off the main outline pipeline.
+        //
+        // Restore: on `panel.navigated` and after the existing 1000ms
+        //          post-load outline pass, iterate rows whose guid is in
+        //          the Set + not already folded + have bt-has-children,
+        //          and `triggerNativeFold(li, true)` in chunks of 5 per
+        //          rAF. A generation counter aborts in-flight restores
+        //          when a new navigation starts.
+        //
+        // Guards:  - foldSelfApplying flag short-circuits the capture
+        //            observer while our own restore is dispatching folds,
+        //            preventing feedback loops.
+        //          - Master switch (isEnabled) AND the user-facing
+        //            "Remember collapse state" toggle each gate capture
+        //            + restore independently.
+        //          - Wrapping scrollTop + selection snapshot/restore keeps
+        //            the viewport steady across restore passes.
+        // =====================================================
+
+        const FOLDED_DEBUG = localStorage.getItem(FOLDED_DEBUG_KEY) === '1';
+        const foldedDebug = (...args) => {
+            if (FOLDED_DEBUG) try { console.log('[ir-fold]', ...args); } catch (_) {}
+        };
+
+        let foldedSet = new Set();
+        // Per-guid last-seen folded state — avoids repeatedly re-diffing
+        // the Set when a class mutation doesn't change fold state.
+        const foldedLastSeen = new Map();
+        let foldedDirty = false;
+        let foldedSaveTimer = null;
+        // True while our restore pass is synthesizing fold clicks. Capture
+        // observer early-returns in this window so restore doesn't re-enter
+        // itself and so manual records don't get double-written.
+        let foldSelfApplying = false;
+        // Bumped on each panel.navigated; in-flight restore chunks check
+        // this before proceeding so a rapid nav cancels the previous pass.
+        let foldRestoreGen = 0;
+
+        const loadFoldedSet = () => {
+            try {
+                const raw = localStorage.getItem(FOLDED_SET_KEY);
+                if (!raw) return;
+                const arr = JSON.parse(raw);
+                if (Array.isArray(arr)) {
+                    foldedSet = new Set(arr.filter(x => typeof x === 'string'));
+                    foldedDebug('loaded', foldedSet.size, 'folded guids');
+                } else {
+                    foldedDebug('stored value not an array — resetting');
+                }
+            } catch (e) {
+                // Corrupt JSON: drop silently, don't block plugin load.
+                console.warn('[ir-fold] failed to parse stored set; resetting', e);
+                try { localStorage.removeItem(FOLDED_SET_KEY); } catch (_) {}
+            }
+        };
+        loadFoldedSet();
+
+        const saveFoldedSetImmediate = () => {
+            if (foldedSaveTimer) {
+                clearTimeout(foldedSaveTimer);
+                foldedSaveTimer = null;
+            }
+            if (!foldedDirty) return;
+            foldedDirty = false;
+            try {
+                localStorage.setItem(FOLDED_SET_KEY, JSON.stringify([...foldedSet]));
+            } catch (e) {
+                // Quota / disabled storage: keep the in-memory set usable
+                // for the session; log once.
+                if (!this._irFoldQuotaLogged) {
+                    console.warn('[ir-fold] could not persist fold set', e);
+                    this._irFoldQuotaLogged = true;
+                }
+            }
+        };
+        const saveFoldedSetDebounced = () => {
+            foldedDirty = true;
+            if (foldedSaveTimer) return;
+            foldedSaveTimer = setTimeout(() => {
+                foldedSaveTimer = null;
+                saveFoldedSetImmediate();
+            }, 500);
+        };
+
+        // Called from the capture observer when a .listitem's class changes.
+        // Fast-path early-returns when fold state hasn't actually flipped.
+        const noteFoldStateChange = (li) => {
+            if (!isEnabled) return;
+            if (!isRememberFoldsEnabled) return;
+            if (foldSelfApplying) return;
+            const guid = li.getAttribute('data-guid');
+            if (!guid) return;
+            const folded = li.classList.contains('listitem-folded');
+            const prev = foldedLastSeen.get(guid);
+            if (prev === folded) return; // no flip — hot-path exit
+            foldedLastSeen.set(guid, folded);
+            const had = foldedSet.has(guid);
+            if (folded && !had) {
+                foldedSet.add(guid);
+                saveFoldedSetDebounced();
+            } else if (!folded && had) {
+                foldedSet.delete(guid);
+                saveFoldedSetDebounced();
+            }
+        };
+
+        // Snapshot active selection + scroll so we can restore them after
+        // a fold pass (synthetic folds can shift focus / collapse layout).
+        const snapshotSelection = () => {
+            const editor = document.querySelector(EDITOR_SELECTORS) || document.body;
+            const scrollTop = (editor.scrollTop !== undefined) ? editor.scrollTop : 0;
+            let range = null;
+            try {
+                const sel = document.getSelection();
+                if (sel && sel.rangeCount > 0) {
+                    range = sel.getRangeAt(0).cloneRange();
+                }
+            } catch (_) {}
+            return { editor, scrollTop, range };
+        };
+        const restoreSelectionSnapshot = (snap) => {
+            if (!snap) return;
+            if (snap.editor && typeof snap.editor.scrollTop === 'number') {
+                try { snap.editor.scrollTop = snap.scrollTop; } catch (_) {}
+            }
+            if (snap.range) {
+                try {
+                    const sel = document.getSelection();
+                    if (sel) { sel.removeAllRanges(); sel.addRange(snap.range); }
+                } catch (_) {}
+            }
+        };
+
+        // Chunked, abortable restore of all rows whose guid is in the
+        // persisted set. Called on initial load + on every page nav.
+        // Runs at most 5 folds per rAF to keep large pages responsive.
+        const RESTORE_CHUNK = 5;
+        const restoreFolds = () => {
+            if (!isEnabled) return;
+            if (!isRememberFoldsEnabled) return;
+            if (foldedSet.size === 0) return;
+            const editor = document.querySelector(EDITOR_SELECTORS);
+            if (!editor) return;
+
+            const started = performance.now();
+            const myGen = ++foldRestoreGen;
+            const rows = editor.querySelectorAll('.listitem[data-guid]');
+            const targets = [];
+            for (const li of rows) {
+                const g = li.getAttribute('data-guid');
+                if (!g || !foldedSet.has(g)) continue;
+                if (li.classList.contains('listitem-folded')) continue;
+                if (!li.classList.contains('bt-has-children')) continue;
+                targets.push(li);
+            }
+            if (targets.length === 0) {
+                foldedDebug('restore: nothing to do');
+                return;
+            }
+            foldedDebug('restore:', targets.length, 'row(s)');
+            const snap = snapshotSelection();
+
+            let i = 0;
+            const step = () => {
+                if (this.isUnloaded) return;
+                if (myGen !== foldRestoreGen) {
+                    foldedDebug('restore aborted (gen superseded)');
+                    return;
+                }
+                foldSelfApplying = true;
+                try {
+                    const end = Math.min(i + RESTORE_CHUNK, targets.length);
+                    for (; i < end; i++) {
+                        const li = targets[i];
+                        // Re-verify — user may have folded it manually
+                        // while chunks were pending.
+                        if (!li.isConnected) continue;
+                        if (li.classList.contains('listitem-folded')) continue;
+                        triggerNativeFold(li, true);
+                    }
+                } finally {
+                    // Release the guard on the next tick so any class
+                    // mutations Thymer applies synchronously here don't
+                    // echo into the capture observer as user-initiated.
+                    setTimeout(() => { foldSelfApplying = false; }, 0);
+                }
+                if (i < targets.length) {
+                    requestAnimationFrame(step);
+                } else {
+                    restoreSelectionSnapshot(snap);
+                    foldedDebug('restore done in',
+                        (performance.now() - started).toFixed(1), 'ms');
+                }
+            };
+            requestAnimationFrame(step);
+        };
+
+        // Dedicated class-attr observer — kept separate from the outline
+        // observer to avoid flooding the main pipeline with hover / focus
+        // class churn. Attached once; re-targets the editor in a cleanup
+        // step below.
+        const foldCaptureObserver = new MutationObserver((mutations) => {
+            if (this.isUnloaded) return;
+            if (foldSelfApplying) return;
+            if (!isEnabled || !isRememberFoldsEnabled) return;
+            for (const m of mutations) {
+                const t = m.target;
+                if (!t || t.nodeType !== 1) continue;
+                if (!t.classList || !t.classList.contains('listitem')) continue;
+                noteFoldStateChange(t);
+            }
+        });
+        const foldCaptureTarget = document.querySelector(EDITOR_SELECTORS) || document.body;
+        foldCaptureObserver.observe(foldCaptureTarget, {
+            attributes: true,
+            attributeFilter: ['class'],
+            subtree: true,
+        });
+
+        // Hook navigation events — run a restore pass each time the
+        // panel switches to a different record. The SDK exposes
+        // panel.navigated via this.events.on.
+        try {
+            if (this.events && typeof this.events.on === 'function') {
+                const navListenerId = this.events.on('panel.navigated', () => {
+                    if (this.isUnloaded) return;
+                    // Wait one frame so Thymer has a chance to populate
+                    // rows + our outline pass has assigned bt-has-children
+                    // before we look for fold targets.
+                    requestAnimationFrame(() => {
+                        if (this.isUnloaded) return;
+                        restoreFolds();
+                    });
+                });
+                if (navListenerId && this.events.off) {
+                    this.cleanupMethods = this.cleanupMethods || [];
+                    this.cleanupMethods.push(() => {
+                        try { this.events.off(navListenerId); } catch (_) {}
+                    });
+                }
+            }
+        } catch (e) {
+            console.warn('[ir-fold] panel.navigated hook failed', e);
+        }
+
+        // Cleanup: disconnect observer, flush pending save.
+        this.cleanupMethods = this.cleanupMethods || [];
+        this.cleanupMethods.push(() => {
+            try { foldCaptureObserver.disconnect(); } catch (_) {}
+            saveFoldedSetImmediate();
+            foldedLastSeen.clear();
+            foldedSet = new Set();
+            foldRestoreGen++; // invalidate any in-flight restore rAFs
+        });
+
         let outlineRafPending = false;
         let outlineRafId = 0;
         const runOutlinePass = () => {
@@ -2222,7 +2502,14 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         // cancel them (S5).
         scheduleOutlinePass();
         const outlineInitTimeout1 = setTimeout(scheduleOutlinePass, 250);
-        const outlineInitTimeout2 = setTimeout(scheduleOutlinePass, 1000);
+        const outlineInitTimeout2 = setTimeout(() => {
+            scheduleOutlinePass();
+            // Kick the initial restore AFTER bt-has-children has settled
+            // on the fully-populated outline — triggerNativeFold skips
+            // rows without that class, so running restore earlier would
+            // miss the parents we need to fold.
+            restoreFolds();
+        }, 1000);
         this.cleanupMethods.push(() => {
             clearTimeout(outlineInitTimeout1);
             clearTimeout(outlineInitTimeout2);
@@ -2921,6 +3208,15 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             if (newSettings.isBulletsEnabled !== undefined) isBulletsEnabled = !!newSettings.isBulletsEnabled;
             if (newSettings.isTogglesEnabled !== undefined) isTogglesEnabled = !!newSettings.isTogglesEnabled;
             if (newSettings.isHoverFrameEnabled !== undefined) isHoverFrameEnabled = !!newSettings.isHoverFrameEnabled;
+            if (newSettings.isRememberFoldsEnabled !== undefined) {
+                const prev = isRememberFoldsEnabled;
+                isRememberFoldsEnabled = !!newSettings.isRememberFoldsEnabled;
+                // Transitioning OFF → flush any pending save; the in-memory
+                // set stays intact so turning it back on recovers history.
+                if (prev && !isRememberFoldsEnabled) {
+                    saveFoldedSetImmediate();
+                }
+            }
             if (newSettings.bulletColorMode !== undefined
                 && (newSettings.bulletColorMode === 'neutral'
                     || newSettings.bulletColorMode === 'hover'
@@ -2964,7 +3260,8 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
                 getSettings: () => ({
                     currentScheme, currentWidth, activeWidth, currentOpacity,
                     isEnabled, threadingMode, isBulletsEnabled, isTogglesEnabled,
-                    bulletColorMode, isHoverFrameEnabled
+                    bulletColorMode, isHoverFrameEnabled,
+                    isRememberFoldsEnabled
                 }),
                 updateSettings,
                 createIcon: (name) => this.ui.createIcon(name)
@@ -3803,6 +4100,20 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             'Hover Frame',
             'Draw a subtle rectangle around the drag handle, chevron, and bullet on row hover. Only visible when both Workflowy Bullets and Disclosure Chevrons are enabled.',
             hoverFrameCheckbox
+        ));
+
+        const rememberFoldsCheckbox = document.createElement('input');
+        rememberFoldsCheckbox.type = 'checkbox';
+        rememberFoldsCheckbox.className = 'ir-checkbox';
+        rememberFoldsCheckbox.checked = !!currentSettings.isRememberFoldsEnabled;
+        rememberFoldsCheckbox.addEventListener('change', (e) => {
+            currentSettings.isRememberFoldsEnabled = e.target.checked;
+            api.updateSettings({ isRememberFoldsEnabled: e.target.checked });
+        });
+        outlineCard.appendChild(createField(
+            'Remember Collapse State',
+            'Restore your collapsed rows after page navigation or reload. Persists per-row (by lineItem id) in local storage.',
+            rememberFoldsCheckbox
         ));
 
         container.appendChild(outlineCard);
