@@ -612,18 +612,6 @@ body.ir-enabled.bt-toggles .listitem.bt-has-children > .bt-marker > .bt-caret:ho
     opacity: 0.95;
 }
 
-/* Match the native .link-menu-action-collapse's hit-box inflation
-   (margin: -10px -5px; padding: 10px 5px) so Thymer's tooltip —
-   positioned relative to getBoundingClientRect().top — sits ~14.5pt
-   above our element, the same gap it has above the native chevron.
-   The negative margin cancels the layout shift the padding would
-   otherwise introduce, so the visible chevron stays centered in the
-   27pt marker column. */
-body.ir-enabled.bt-toggles .bt-marker > .bt-caret {
-    padding: 10px 5px !important;
-    margin: -10px -5px !important;
-}
-
 /* ---------- Bullet (clickable dot) ---------- */
 
 body.ir-enabled .bt-bullet {
@@ -639,15 +627,6 @@ body.ir-enabled .bt-bullet {
 
 body.ir-enabled.bt-bullets .bt-marker > .bt-bullet {
     display: inline-flex;
-}
-
-/* Match the native .link-menu-action-zoom's hit-box inflation so
-   Thymer's tooltip sits ~14.5pt above the bullet, matching the
-   gap above the native icon. See the matching rule for .bt-caret
-   for the full rationale. */
-body.ir-enabled.bt-bullets .bt-marker > .bt-bullet {
-    padding: 10px 5px !important;
-    margin: -10px -5px !important;
 }
 
 /* --bt-bullet-fill is the effective color used for the bullet's solid dot,
