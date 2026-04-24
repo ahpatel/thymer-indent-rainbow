@@ -236,10 +236,11 @@ class Plugin extends AppPlugin {
             currentScheme = 'rainbow';
         }
 
-        // Get saved settings or defaults. Widths are integer 0..4 (matches
-        // the settings-panel slider range); opacity is 0..1.
+        // Get saved settings or defaults. Widths support 0.5 step (0..4);
+        // opacity is 0..1. parseFloat preserves the fraction; clampNum
+        // uses Number() which also preserves it.
         let currentWidth = clampNum(
-            parseInt(localStorage.getItem(WIDTH_KEY), 10), 0, 4, 1);
+            parseFloat(localStorage.getItem(WIDTH_KEY)), 0, 4, 1);
         // activeWidth supports fractional values (0.5 step) so users can
         // pick a hairline-thin focus highlight. clampNum uses Number()
         // which preserves the fraction.
@@ -3733,7 +3734,7 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
                 currentScheme = newSettings.currentScheme;
             }
             if (newSettings.currentWidth !== undefined) {
-                currentWidth = clampNum(parseInt(newSettings.currentWidth, 10), 0, 4, currentWidth);
+                currentWidth = clampNum(parseFloat(newSettings.currentWidth), 0, 4, currentWidth);
             }
             if (newSettings.activeWidth !== undefined) {
                 activeWidth = clampNum(parseFloat(newSettings.activeWidth), 0, 4, activeWidth);
@@ -4316,7 +4317,7 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             previewCanvas.classList.toggle('ir-preview-disabled', !s.isEnabled);
 
             const colors = api.colorSchemes[s.currentScheme]?.colors || [];
-            const barWidth = Math.max(0, s.currentWidth);
+            const barWidth = Math.max(0, parseFloat(s.currentWidth));
             const opacity = parseFloat(s.currentOpacity);
             // Mirror the production outline features so the preview reacts
             // live to the Bullets / Chevrons / Bullet Color toggles.
@@ -4511,10 +4512,11 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         widthSlider.className = 'ir-range';
         widthSlider.min = '0';
         widthSlider.max = '4';
-        widthSlider.step = '1';
+        // 0.5 step allows a hairline-thin guide (matches activeWidth).
+        widthSlider.step = '0.5';
         widthSlider.value = currentSettings.currentWidth;
         widthSlider.addEventListener('input', (e) => {
-            currentSettings.currentWidth = parseInt(e.target.value, 10);
+            currentSettings.currentWidth = parseFloat(e.target.value);
             widthVal.textContent = formatWidthValue(currentSettings.currentWidth);
             api.updateSettings({ currentWidth: e.target.value });
             renderPreview(currentSettings);
@@ -4574,8 +4576,8 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         aWidthSlider.className = 'ir-range';
         aWidthSlider.min = '0';
         aWidthSlider.max = '4';
-        // 0.5 step allows a hairline-thin active highlight (the only
-        // width with sub-pixel steps; currentWidth remains integer).
+        // 0.5 step allows a hairline-thin active highlight (matches
+        // the standard guide width control below).
         aWidthSlider.step = '0.5';
         aWidthSlider.value = currentSettings.activeWidth;
         aWidthSlider.addEventListener('input', (e) => {
