@@ -3470,25 +3470,35 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         // overlay is still up it intercepts those events and the fold
         // no-ops. 50ms is enough for Thymer's palette close animation;
         // any remaining ms overlap is invisible to the user.
+        // TEMP diagnostic: toaster every step so we can see on-screen
+        // exactly where the bulk-fold flow breaks, without DevTools.
+        const toast = (msg) => {
+            try {
+                if (this.ui && typeof this.ui.showToaster === 'function') {
+                    this.ui.showToaster({ message: msg, duration: 2000 });
+                } else if (this.ui && typeof this.ui.addToaster === 'function') {
+                    this.ui.addToaster({ title: msg, dismissible: true, autoDestroyTime: 2000 });
+                }
+            } catch (_) {}
+        };
         const runBulkDeferred = (fn, emptyMsg, label) => {
-            // Unconditional log so we can see in the console whether the
-            // command is actually firing. Remove once confirmed working.
+            toast(`[ir-fold] ${label}: onSelected fired`);
             console.log('[ir-fold] command fired:', label);
             setTimeout(() => {
-                if (this.isUnloaded) return;
+                if (this.isUnloaded) { toast('[ir-fold] plugin unloaded'); return; }
                 try {
                     const editor = document.querySelector(EDITOR_SELECTORS);
                     const rowCount = editor
                         ? editor.querySelectorAll('.listitem[data-guid]').length
                         : 0;
+                    toast(`[ir-fold] editor:${!!editor} rows:${rowCount}`);
                     console.log('[ir-fold] editor found:', !!editor,
                         '; rows with data-guid:', rowCount);
                     const n = fn();
+                    toast(`[ir-fold] ${label}: queued ${n} row(s)`);
                     console.log('[ir-fold]', label, 'queued', n, 'row(s)');
-                    if (n === 0 && this.ui && typeof this.ui.showToaster === 'function') {
-                        this.ui.showToaster({ message: emptyMsg, duration: 1500 });
-                    }
                 } catch (e) {
+                    toast(`[ir-fold] ERROR: ${e && e.message ? e.message : e}`);
                     console.error('[ir-fold] bulk command threw:', e);
                 }
             }, 50);
