@@ -114,6 +114,23 @@ class Plugin extends AppPlugin {
 
         // Color schemes for different tastes
         const colorSchemes = {
+            native: {
+                name: 'Native (Thymer Default)',
+                // Single muted slate repeated across all levels — matches
+                // the look of Thymer's native indent guides: uniform, low-
+                // saturation, depth conveyed by position alone. Pair with
+                // a lower opacity (e.g. 0.3–0.5) for the subtlest result.
+                colors: [
+                    '#5a6168',
+                    '#5a6168',
+                    '#5a6168',
+                    '#5a6168',
+                    '#5a6168',
+                    '#5a6168',
+                    '#5a6168',
+                    '#5a6168',
+                ]
+            },
             rainbow: {
                 name: 'Rainbow',
                 colors: [
