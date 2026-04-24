@@ -3508,6 +3508,11 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             )
         });
 
+        // Temporary load marker so we can verify the new plugin code
+        // is actually running after a reload. Remove once bulk fold is
+        // confirmed working.
+        console.log('[ir-fold] plugin loaded (build 7767497+) — bulk fold commands registered');
+
     }
 
     onUnload() {
