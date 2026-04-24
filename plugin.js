@@ -941,6 +941,24 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
     /* Visual-only nudge: the hit-zone (set by 'left' above) is correct, but the painted ring sits ~20px too far right. transform shifts paint without touching layout, so the hit-zone stays put while the circle visually aligns with the drag-gutter. */
     transform: translateX(0px) !important;
 }
+
+/* ---------- Skip-panel scope ----------
+   Panels whose type is not 'edit_panel' (e.g. search results, overview,
+   custom panels) get the .bt-skip-panel class applied to their root
+   element by refreshPanelScope() via this.ui.getPanels(). These rules
+   neutralize our plugin visuals inside that subtree WITHOUT refactoring
+   the 80+ body-level rules above. Marker DOM is never injected there in
+   the first place; these rules cover any transient .listitem rendering
+   between a panel's creation and our refreshPanelScope pass.
+*/
+.bt-skip-panel .bt-marker { display: none !important; }
+.bt-skip-panel .listitem-indentline {
+    background: none !important;
+    opacity: 0 !important;
+    box-shadow: none !important;
+    filter: none !important;
+    border: none !important;
+}
 `;
 
         // Write the palette for the current scheme as --ir-level-N root vars.
@@ -998,6 +1016,90 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         applySchemeVars(currentScheme);
         applySettingVars();
         applyEnabledState();
+
+        // ---------- Panel scope ----------
+        // Only apply the plugin's visuals + marker injection to panels
+        // whose type is 'edit_panel'. Other panel types (search results,
+        // overview, custom panels including our own settings panel) get
+        // their root element tagged with `bt-skip-panel`, which:
+        //   - is excluded by `isInsideSkipPanel(el)` so injectMarker
+        //     early-returns for any .listitem inside that subtree, and
+        //   - activates the CSS reset block in STATIC_CSS which hides
+        //     .bt-marker and nullifies our indentline painting.
+        //
+        // Rebuilt on panel.focused / panel.navigated / panel.closed SDK
+        // events since panels can change type across their lifetime
+        // (e.g. a custom panel type is set after createPanel()).
+        const EDITOR_PANEL_TYPE = 'edit_panel';
+        const skipPanelRoots = new Set();
+        const refreshPanelScope = () => {
+            if (typeof this.ui?.getPanels !== 'function') return;
+            let panels;
+            try { panels = this.ui.getPanels(); } catch { return; }
+            if (!Array.isArray(panels)) return;
+            const nextSkip = new Set();
+            for (const p of panels) {
+                if (!p || typeof p.getElement !== 'function') continue;
+                const el = p.getElement();
+                if (!el) continue;
+                const type = (typeof p.getType === 'function' ? p.getType() : '') || '';
+                if (type !== EDITOR_PANEL_TYPE) {
+                    nextSkip.add(el);
+                    if (!el.classList.contains('bt-skip-panel')) {
+                        el.classList.add('bt-skip-panel');
+                    }
+                } else if (el.classList.contains('bt-skip-panel')) {
+                    // Panel transitioned INTO editor type (rare but
+                    // possible across navigation) — lift the skip.
+                    el.classList.remove('bt-skip-panel');
+                }
+            }
+            // Clean up roots that are no longer present in getPanels()
+            // (panel closed) — drop the class so stale DOM doesn't
+            // accumulate the marker.
+            for (const el of skipPanelRoots) {
+                if (!nextSkip.has(el) && el.isConnected) {
+                    el.classList.remove('bt-skip-panel');
+                }
+            }
+            skipPanelRoots.clear();
+            for (const el of nextSkip) skipPanelRoots.add(el);
+        };
+        const isInsideSkipPanel = (el) => {
+            if (!el || skipPanelRoots.size === 0) return false;
+            let a = el;
+            while (a && a !== document.body) {
+                if (a.classList && a.classList.contains('bt-skip-panel')) return true;
+                a = a.parentNode;
+            }
+            return false;
+        };
+        // Initial pass (some panels may already exist when we load).
+        refreshPanelScope();
+        // Re-sync whenever panels change. Deferred by a microtask so
+        // panel.getType() reflects the post-event state even when the
+        // event fires during the panel's own init sequence.
+        const onPanelEvent = () => { queueMicrotask(refreshPanelScope); };
+        if (typeof this.on === 'function') {
+            this.on('panel.focused', onPanelEvent);
+            this.on('panel.navigated', onPanelEvent);
+            this.on('panel.closed', onPanelEvent);
+            this.cleanupMethods.push(() => {
+                if (typeof this.off === 'function') {
+                    try { this.off('panel.focused', onPanelEvent); } catch {}
+                    try { this.off('panel.navigated', onPanelEvent); } catch {}
+                    try { this.off('panel.closed', onPanelEvent); } catch {}
+                }
+            });
+        }
+        this.cleanupMethods.push(() => {
+            // On unload strip our class from any tagged roots so nothing
+            // stays hidden if the user reinstalls/toggles.
+            for (const el of skipPanelRoots) {
+                if (el.isConnected) el.classList.remove('bt-skip-panel');
+            }
+            skipPanelRoots.clear();
+        });
 
         // =====================================================
         // Focus Tracking via .listitem-with-caret
@@ -1599,6 +1701,9 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         // preserved without absolute positioning.
         const injectMarker = (li) => {
             if (!li || !li.classList || !li.classList.contains('listitem')) return;
+            // Skip any .listitem that lives inside a non-editor panel
+            // (search, overview, custom panels). See refreshPanelScope.
+            if (isInsideSkipPanel(li)) return;
             let marker = li.firstElementChild;
             if (marker && marker.classList.contains('bt-marker')) {
                 // Marker already present — re-sync indent in case Thymer
