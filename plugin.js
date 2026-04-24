@@ -1645,6 +1645,12 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             outlineMutating = true;
             li.insertBefore(marker, li.firstElementChild);
             outlineMutating = false;
+            // Mirror the native link-menu tooltips onto the in-row
+            // affordances so hover hints match the native UI. Safe to
+            // call even before a link-menu has been seen — the fallback
+            // English strings from `nativeTooltips` apply until the
+            // first capture.
+            applyMarkerTooltips(li);
             // The caret may have been sitting at listitem offset 0 just
             // before the insert (newly-created empty row case). After the
             // insert, offset 0 now points before our marker. Forward it.
@@ -1868,6 +1874,9 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
                 caret.classList.remove('ti-chevron-down');
                 caret.classList.add('ti-chevron-right');
             }
+            // Keep the caret's hover title in sync with fold state so
+            // the tooltip reflects what a click will do.
+            applyMarkerTooltips(li);
         };
 
         // Previously this function hid descendant rows by setting
@@ -2740,6 +2749,78 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             document.body.classList.remove('bt-bullets', 'bt-toggles');
         });
 
+        // ----- Native tooltip text capture -----
+        // The user's in-row affordances (.bt-caret, .bt-bullet) replace
+        // what the native .link-menu popup exposes (collapse/expand/zoom)
+        // when our toggles + bullets settings are on. To keep parity,
+        // mirror the native tooltips onto our elements: "Collapse" /
+        // "Expand" on .bt-caret (toggled in updateCaretIcon) and the
+        // zoom tooltip on .bt-bullet.
+        //
+        // Native text is read lazily from the first .link-menu that
+        // appears in the DOM — we check title / aria-label / data-tooltip
+        // in that order and cache whichever is populated. Hardcoded
+        // English fallbacks ensure tooltips appear even before any
+        // link-menu has been seen (e.g. if the user hovers a row-caret
+        // before ever hovering the native popup).
+        const nativeTooltips = {
+            collapse: 'Collapse',
+            expand: 'Expand',
+            zoom: 'Zoom in',
+        };
+        const readBtnTooltip = (el) => {
+            if (!el) return null;
+            return el.getAttribute('title')
+                || el.getAttribute('aria-label')
+                || el.getAttribute('data-tooltip')
+                || null;
+        };
+        let tooltipsCaptured = false;
+        const captureNativeTooltips = (linkMenu) => {
+            if (!linkMenu || !linkMenu.querySelector) return;
+            const c = linkMenu.querySelector(':scope > .link-menu-action-collapse');
+            const e = linkMenu.querySelector(':scope > .link-menu-action-expand');
+            const z = linkMenu.querySelector(':scope > .link-menu-action-zoom');
+            let changed = false;
+            const ct = readBtnTooltip(c);
+            if (ct && ct !== nativeTooltips.collapse) { nativeTooltips.collapse = ct; changed = true; }
+            const et = readBtnTooltip(e);
+            if (et && et !== nativeTooltips.expand) { nativeTooltips.expand = et; changed = true; }
+            const zt = readBtnTooltip(z);
+            if (zt && zt !== nativeTooltips.zoom) { nativeTooltips.zoom = zt; changed = true; }
+            // First time we harvest text different from the English
+            // fallbacks, re-apply to every row so existing markers pick
+            // up the native wording without waiting for the next
+            // outline / caret-update pass.
+            if (changed && !tooltipsCaptured) {
+                tooltipsCaptured = true;
+                document.querySelectorAll('.listitem').forEach(applyMarkerTooltips);
+            }
+        };
+
+        // Apply the cached native tooltip to a row's in-row affordances.
+        // Bullet tooltip is static ("Zoom in"); caret toggles based on
+        // current fold state so the hover hint matches what a click will
+        // do — mirroring Thymer's own link-menu behavior where the
+        // button label flips between Collapse and Expand.
+        const applyMarkerTooltips = (li) => {
+            if (!li || !li.classList?.contains('listitem')) return;
+            const marker = li.firstElementChild;
+            if (!marker || !marker.classList?.contains('bt-marker')) return;
+            const caret = marker.querySelector(':scope > .bt-caret');
+            const bullet = marker.querySelector(':scope > .bt-bullet');
+            if (bullet && bullet.getAttribute('title') !== nativeTooltips.zoom) {
+                bullet.setAttribute('title', nativeTooltips.zoom);
+            }
+            if (caret) {
+                const folded = li.classList.contains('listitem-folded');
+                const want = folded ? nativeTooltips.expand : nativeTooltips.collapse;
+                if (caret.getAttribute('title') !== want) {
+                    caret.setAttribute('title', want);
+                }
+            }
+        };
+
         // ----- link-menu drag-handle DOM reorder -----
         // When Thymer injects a .link-menu hover popup, move .item-drag-handle
         // to be the FIRST child so the drag circle renders on the left. We use
@@ -2817,6 +2898,10 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         const onLinkMenuAdded = (linkMenu) => {
             reorderLinkMenu(linkMenu);
             attachPerMenuObserver(linkMenu);
+            // Harvest the native tooltip strings (collapse/expand/zoom)
+            // off this menu's action buttons so subsequent .bt-caret /
+            // .bt-bullet hovers show the same hint text Thymer uses.
+            captureNativeTooltips(linkMenu);
             // rAF so Thymer's initial inline top/left are in place before
             // we measure (style is assigned after insertion in some paths).
             requestAnimationFrame(() => alignDragHandleToFirstLine(linkMenu));
