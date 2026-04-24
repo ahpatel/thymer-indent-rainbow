@@ -605,21 +605,6 @@ body.ir-enabled .bt-caret::before {
     display: block;
     line-height: 1;
 }
-/* Expand the tooltip anchor box on .bt-caret / .bt-bullet with the
-   same padding + negative margin trick the native .link-menu-action
-   buttons use ('margin: -10px -5px; padding: 10px 5px'). This grows
-   the element's bounding rect ~10px in every direction WITHOUT
-   visually shifting the glyph (content stays centered via
-   place-items/flex) and WITHOUT taking extra layout space (negative
-   margin cancels the padding externally). Thymer's tooltip engine
-   positions via getBoundingClientRect, so the extra 10px puts the
-   popup ~14.5pt above the glyph — matching the native drag-handle
-   tooltip spacing instead of the cramped 5pt we'd otherwise have. */
-body.ir-enabled.bt-toggles .bt-marker > .bt-caret.tooltip,
-body.ir-enabled.bt-bullets .bt-marker > .bt-bullet.tooltip {
-    padding: 10px 5px;
-    margin: -10px -5px;
-}
 body.ir-enabled.bt-toggles .listitem.bt-has-children > .bt-marker > .bt-caret {
     opacity: 0.55;
 }
