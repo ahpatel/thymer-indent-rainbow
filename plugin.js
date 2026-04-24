@@ -2425,6 +2425,18 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
                 }
                 return d;
             };
+            // "Has children" detection — don't rely on our own
+            // bt-has-children class, which is applied by our outline pass
+            // and may not be present on every row (or on top-level rows
+            // at all in the current Thymer build). Instead look at the
+            // DOM: any row that contains a descendant .listitem has
+            // children, structurally. We also treat listitem-folded as
+            // a positive signal (it can't be folded without having
+            // something to hide).
+            const hasChildren = (li) =>
+                !!li.querySelector('.listitem') ||
+                li.classList.contains('listitem-folded') ||
+                li.classList.contains('bt-has-children');
             const targets = all.filter(li => {
                 if (!li.isConnected) return false;
                 const isFolded = li.classList.contains('listitem-folded');
@@ -2435,9 +2447,7 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
                     // page-collapse without having to individually fold
                     // every nested parent. Matches the Workflowy
                     // convention and keeps the visual result minimal.
-                    return depth(li) === 0
-                        && li.classList.contains('bt-has-children')
-                        && !isFolded;
+                    return depth(li) === 0 && hasChildren(li) && !isFolded;
                 }
                 // Unfold: every folded row on the page so the tree fully
                 // opens, regardless of depth.
@@ -3493,7 +3503,7 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             }
         }, 50);
         this.ui.addCommandPaletteCommand({
-            label: "Fold All on this page",
+            label: "Fold All (top level) on this page",
             icon: "chevron-right",
             onSelected: () => runBulkDeferred(
                 foldAllOnPage, 'Nothing to fold on this page'
