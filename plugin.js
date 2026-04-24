@@ -102,6 +102,7 @@ class Plugin extends AppPlugin {
         const BULLETS_ENABLED_KEY = 'indent-rainbow-bullets-enabled';
         const TOGGLES_ENABLED_KEY = 'indent-rainbow-toggles-enabled';
         const BULLET_COLOR_MODE_KEY = 'indent-rainbow-bullet-color-mode';
+        const HOVER_FRAME_KEY = 'indent-rainbow-hover-frame';
 
         // Color schemes for different tastes
         const colorSchemes = {
@@ -242,6 +243,7 @@ class Plugin extends AppPlugin {
         let threadingMode = (savedThreadingMode === 'stretched') ? 'stretched' : 'staircase';
         let isBulletsEnabled = localStorage.getItem(BULLETS_ENABLED_KEY) !== 'false'; // default true
         let isTogglesEnabled = localStorage.getItem(TOGGLES_ENABLED_KEY) !== 'false'; // default true
+        let isHoverFrameEnabled = localStorage.getItem(HOVER_FRAME_KEY) !== 'false'; // default true
         // Tri-state bullet color mode — 'neutral' | 'hover' | 'always'.
         // Default 'always' so new installs see rainbow-colored bullets; existing
         // users with nothing persisted get the same default on first load.
@@ -326,6 +328,15 @@ body.ir-enabled .listitem-olist .listitem-indentline {
    elements centered within their column). */
 body.ir-enabled.bt-bullets {
     --ir-bullet-shift: -10px;
+}
+
+/* Both-on mode adds 5pt of margin-right on .bt-marker so row text
+   clears the hover frame's right edge. That margin also pushes the
+   downstream indent-line to the right, so compensate here with an
+   additional 5pt of leftward shift to keep the guides under the
+   bullets / numbers / chevrons. */
+body.ir-enabled.bt-bullets.bt-toggles {
+    --ir-bullet-shift: calc(-10px - 5pt);
 }
 
 /* Base: nudge applies to every indent line (catches headings + text + task). */
@@ -449,6 +460,59 @@ body.ir-enabled .bt-marker {
 body.ir-enabled.bt-bullets .bt-marker,
 body.ir-enabled.bt-toggles .bt-marker {
     display: inline-flex;
+}
+
+/* Both-on mode: wrap [drag-circle | chevron | bullet] in a soft
+   rectangle on row hover. Drawn as a ::before pseudo-element on
+   .bt-marker, inflated to the left by 30px so it visually encloses
+   the drag circle (which Thymer positions inside .link-menu at
+   left:-54px, i.e. just left of the marker). Pointer-transparent so
+   it never steals fold/drag clicks; z-index:-1 keeps caret/bullet
+   rendering on top.
+   .bt-drag-hover is added to the listitem by JS when the mouse is
+   over the drag-handle — necessary because .link-menu isn't a DOM
+   descendant of .listitem, so plain .listitem:hover drops while the
+   mouse is on the drag circle. */
+/* Reserve breathing room after the marker in both-on mode so the row
+   text doesn't sit under the hover frame's right edge when it paints. */
+body.ir-enabled.bt-bullets.bt-toggles .bt-marker {
+    margin-right: 5pt;
+}
+body.ir-enabled.bt-bullets.bt-toggles .bt-marker::before {
+    content: "";
+    position: absolute;
+    /* Match Thymer's native link-menu popup dimensions (~83pt wide,
+       28pt tall) and its pill silhouette so the both-on cluster reads
+       as a first-class UI affordance. Height is set via symmetric
+       top/bottom insets that land 28pt total around the marker
+       midline; width is driven by extending the left inset so the
+       drag circle (at left:-24px) falls inside. */
+    /* Asymmetric vertical insets shift the rectangle up so gaps around
+       the chevron/bullet read as 4.75pt on each side. Symmetric -3.5pt
+       insets measured 3pt top / 6.5pt bottom because the marker's
+       baseline-aligned box sits below the visible glyph center —
+       shifting the rect up by 1.75pt recenters it on the glyphs. */
+    inset: -3.25pt -3pt -3.25pt -22pt;
+    border-radius: 4pt;
+    background: transparent;
+    border: 1px solid transparent;
+    pointer-events: none;
+    z-index: -1;
+    transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+body.ir-enabled.bt-bullets.bt-toggles.ir-hover-frame .listitem:hover > .bt-marker::before,
+body.ir-enabled.bt-bullets.bt-toggles.ir-hover-frame .listitem.bt-drag-hover > .bt-marker::before {
+    /* Paint an opaque fill that's *darker* than the page bg so the
+       rectangle reads as a recessed surface (matches Thymer's native
+       hover popup on dark themes). Start from --ir-marker-knockout-bg
+       (the theme-tracked page bg with fallback chain) and mix in a bit
+       of black. Previously mixed with currentColor, but on dark themes
+       currentColor is light text → the rectangle ended up LIGHTER than
+       the page, the opposite of what we want. */
+    background: color-mix(in srgb,
+        var(--ir-marker-knockout-bg) 50%,
+        #000 15%);
+    border-color: color-mix(in srgb, currentColor 28%, transparent);
 }
 
 /* Heading rows (H1–H6) lack the listitem-text/task/ulist/olist classes
@@ -749,26 +813,28 @@ body.ir-enabled.bt-bullets .item-drag-handle {
        text baseline), regardless of the row's total height on
        wrapped rows. 1em resolves to the listitem's own font-size, so
        headings and body text both line up. */
-    top: calc(1em - 13.5px) !important;
+    top: calc(1em - 14.5px) !important;
+    /* -24px previously produced an 11pt gap between the circle and
+       the chevron; +5pt rightward (≈ 6.67px) closes that gap to the
+       intended 6pt, matching the chevron↔bullet spacing. */
+    left: calc(-24px - 2pt) !important;
     bottom: auto !important;
+    /* Stack above .bt-marker (z-index: 11) so the both-on hover
+       rectangle's opaque ::before (painted as part of bt-marker's
+       stacking context) doesn't cover the drag circle. */
+    z-index: 12 !important;
 }
 body.ir-enabled.bt-toggles .item-drag-handle .handle-fold-icon,
 body.ir-enabled.bt-bullets .item-drag-handle .handle-fold-icon {
     display: none;
 }
+/* No inner glyph — match native drag circle (dashed ring, empty
+   interior). The ::after remains declared so Thymer's own fold-icon
+   SVG stays hidden via display:none above without anything else
+   jumping in to fill the circle. */
 body.ir-enabled.bt-toggles .item-drag-handle::after,
 body.ir-enabled.bt-bullets .item-drag-handle::after {
-    content: " ";              
-    font-size: 18px;
-    line-height: 1;
-    color: currentColor;
-    opacity: 0.55;
-    pointer-events: none;      /* clicks pass through to .item-drag-handle */
-    letter-spacing: 1px;
-}
-body.ir-enabled.bt-toggles .item-drag-handle:hover::after,
-body.ir-enabled.bt-bullets .item-drag-handle:hover::after {
-    opacity: 0.95;
+    content: none;
 }
 
 /* Uniform 27px slots for every .link-menu component. Thymer's native
@@ -848,7 +914,12 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu::after {
 body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
     pointer-events: auto !important;
     position: relative !important;
-    left: -27px !important;
+    /* Shift the drag circle all the way to the LEFT of the chevron.
+       27px = one drag-handle slot (gets us over the bullet/chevron
+       column); another 27px clears the full .bt-marker (caret 18px +
+       gap 2px + bullet ~18px + padding/border ~4px). Tune if the
+       rectangle's padding in the both-on marker rule changes. */
+    left: -54px !important;
     /* Visual-only nudge: the hit-zone (set by 'left' above) is correct, but the painted ring sits ~20px too far right. transform shifts paint without touching layout, so the hit-zone stays put while the circle visually aligns with the drag-gutter. */
     transform: translateX(0px) !important;
 }
@@ -886,6 +957,7 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             localStorage.setItem(BULLETS_ENABLED_KEY, isBulletsEnabled);
             localStorage.setItem(TOGGLES_ENABLED_KEY, isTogglesEnabled);
             localStorage.setItem(BULLET_COLOR_MODE_KEY, bulletColorMode);
+            localStorage.setItem(HOVER_FRAME_KEY, isHoverFrameEnabled);
         };
 
         // Toggle the ir-enabled body class which gates all our CSS rules.
@@ -898,6 +970,8 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             document.body.classList.toggle('ir-bullets-neutral', bulletColorMode === 'neutral');
             document.body.classList.toggle('ir-bullets-hover', bulletColorMode === 'hover');
             document.body.classList.toggle('ir-bullets-always', bulletColorMode === 'always');
+            document.body.classList.toggle('ir-hover-frame',
+                isEnabled && isHoverFrameEnabled);
         };
 
         // Inject the static stylesheet once.
@@ -2678,6 +2752,76 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             outlineTarget.removeEventListener('click', outlineClickHandler, true);
         });
 
+        // Mirror drag-handle hover onto the anchored .listitem via the
+        // `bt-drag-hover` class. .link-menu (drag-handle's parent) is
+        // absolutely positioned outside .listitem's DOM subtree, so
+        // CSS :hover on the row drops the moment the cursor crosses
+        // onto the drag circle. Track the most recently hovered
+        // .listitem and reuse it as the anchor when the cursor is on
+        // the drag circle — more robust than resolving via the
+        // link-menu's data-guid (which can be stale or absent when
+        // Thymer is mid-repositioning the popup).
+        let lastHoveredLi = null;
+        let lastDragHoverLi = null;
+        const clearDragHover = () => {
+            if (lastDragHoverLi) {
+                lastDragHoverLi.classList.remove('bt-drag-hover');
+                lastDragHoverLi = null;
+            }
+        };
+        const onAnyMouseOver = (e) => {
+            const t = e.target;
+            if (!t || !t.closest) return;
+            // Remember any listitem we pass through so we can reuse it
+            // as the anchor when the pointer leaves .listitem for
+            // .item-drag-handle (a DOM-disjoint sibling).
+            const li = t.closest('.listitem');
+            if (li) lastHoveredLi = li;
+            if (!isEnabled || !isTogglesEnabled || !isBulletsEnabled) return;
+            const dh = t.closest('.item-drag-handle');
+            if (!dh) {
+                // Mouse is somewhere other than the drag-handle — let
+                // CSS :hover drive the rectangle.
+                clearDragHover();
+                return;
+            }
+            // Prefer the link-menu's data-guid (the row it's anchored
+            // to); fall back to the last-hovered listitem if the menu
+            // hasn't got a guid yet or the lookup fails.
+            let anchor = null;
+            const menu = dh.closest('.link-menu');
+            const guid = menu && menu.getAttribute('data-guid');
+            if (guid) {
+                anchor = document.querySelector(
+                    `.listitem[data-guid="${CSS.escape(guid)}"]`);
+            }
+            if (!anchor) anchor = lastHoveredLi;
+            if (!anchor) return;
+            if (anchor === lastDragHoverLi) return;
+            clearDragHover();
+            anchor.classList.add('bt-drag-hover');
+            lastDragHoverLi = anchor;
+        };
+        const onAnyMouseOut = (e) => {
+            if (!lastDragHoverLi) return;
+            const to = e.relatedTarget;
+            // Still inside the drag-handle or the anchored listitem →
+            // keep the class.
+            if (to && to.closest) {
+                if (to.closest('.item-drag-handle')) return;
+                if (to.closest('.listitem') === lastDragHoverLi) return;
+            }
+            clearDragHover();
+        };
+        document.addEventListener('mouseover', onAnyMouseOver, true);
+        document.addEventListener('mouseout', onAnyMouseOut, true);
+        this.cleanupMethods.push(() => {
+            document.removeEventListener('mouseover', onAnyMouseOver, true);
+            document.removeEventListener('mouseout', onAnyMouseOut, true);
+            clearDragHover();
+            lastHoveredLi = null;
+        });
+
         // Cursor-placement guard. See forwardCursorPastMarker above — this
         // listener covers the click / arrow-navigation path. The new-row
         // path is handled inline in injectMarker. Single shared helper so
@@ -2776,6 +2920,7 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             }
             if (newSettings.isBulletsEnabled !== undefined) isBulletsEnabled = !!newSettings.isBulletsEnabled;
             if (newSettings.isTogglesEnabled !== undefined) isTogglesEnabled = !!newSettings.isTogglesEnabled;
+            if (newSettings.isHoverFrameEnabled !== undefined) isHoverFrameEnabled = !!newSettings.isHoverFrameEnabled;
             if (newSettings.bulletColorMode !== undefined
                 && (newSettings.bulletColorMode === 'neutral'
                     || newSettings.bulletColorMode === 'hover'
@@ -2819,7 +2964,7 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
                 getSettings: () => ({
                     currentScheme, currentWidth, activeWidth, currentOpacity,
                     isEnabled, threadingMode, isBulletsEnabled, isTogglesEnabled,
-                    bulletColorMode
+                    bulletColorMode, isHoverFrameEnabled
                 }),
                 updateSettings,
                 createIcon: (name) => this.ui.createIcon(name)
@@ -2869,7 +3014,7 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
         document.querySelectorAll('.bt-thread-parent').forEach(el => el.classList.remove('bt-thread-parent'));
         document.body.classList.remove('ir-enabled', 'bt-bullets', 'bt-toggles',
             'ir-bullets-neutral', 'ir-bullets-hover', 'ir-bullets-always',
-            'ir-guides-hidden');
+            'ir-guides-hidden', 'ir-hover-frame');
 
         if (this.styleElement) {
             this.styleElement.remove();
@@ -3643,6 +3788,21 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             'Disclosure Chevrons',
             'Show a chevron on rows that have sub-items; click to collapse / expand.',
             togglesCheckbox
+        ));
+
+        const hoverFrameCheckbox = document.createElement('input');
+        hoverFrameCheckbox.type = 'checkbox';
+        hoverFrameCheckbox.className = 'ir-checkbox';
+        hoverFrameCheckbox.checked = !!currentSettings.isHoverFrameEnabled;
+        hoverFrameCheckbox.addEventListener('change', (e) => {
+            currentSettings.isHoverFrameEnabled = e.target.checked;
+            api.updateSettings({ isHoverFrameEnabled: e.target.checked });
+            renderPreview(currentSettings);
+        });
+        outlineCard.appendChild(createField(
+            'Hover Frame',
+            'Draw a subtle rectangle around the drag handle, chevron, and bullet on row hover. Only visible when both Workflowy Bullets and Disclosure Chevrons are enabled.',
+            hoverFrameCheckbox
         ));
 
         container.appendChild(outlineCard);
