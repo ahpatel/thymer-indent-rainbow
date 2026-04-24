@@ -1711,6 +1711,69 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
             }
         };
 
+        // ===== TEMP DIAGNOSTIC — remove once root cause confirmed =====
+        // Snapshot window.getSelection() state at key ticks around an
+        // Enter keystroke so we can see whether Selection reflects the
+        // visual caret's position (and therefore whether our forwarding
+        // has any chance of working) or whether Thymer's virtualinput
+        // keeps the real caret elsewhere.
+        const diagSnapshotSelection = (tag) => {
+            try {
+                const sel = window.getSelection && window.getSelection();
+                if (!sel) { console.log(`[ir-caret ${tag}] no selection obj`); return; }
+                if (!sel.rangeCount) { console.log(`[ir-caret ${tag}] rangeCount=0`); return; }
+                const r = sel.getRangeAt(0);
+                const sc = r.startContainer;
+                const describe = (n) => {
+                    if (!n) return 'null';
+                    if (n.nodeType === 3) {
+                        const p = n.parentNode;
+                        return `#text("${(n.nodeValue || '').slice(0, 20)}") parent=${p ? p.tagName + '.' + (p.className || '') : '?'}`;
+                    }
+                    if (n.nodeType === 1) {
+                        return `<${n.tagName.toLowerCase()} class="${n.className || ''}" id="${n.id || ''}">`;
+                    }
+                    return `nodeType=${n.nodeType}`;
+                };
+                // Build an ancestor path to find which .listitem (if any)
+                // this container lives in.
+                let a = sc.nodeType === 1 ? sc : sc.parentNode;
+                let li = null, hops = 0;
+                while (a && hops++ < 20) {
+                    if (a.classList && a.classList.contains('listitem')) { li = a; break; }
+                    a = a.parentNode;
+                }
+                const vi = document.getElementById('virtualinput-wrapper');
+                const viHasFocus = vi && (vi === document.activeElement || vi.contains(document.activeElement));
+                console.log(
+                    `[ir-caret ${tag}] collapsed=${r.collapsed}`,
+                    `offset=${r.startOffset}`,
+                    `container=${describe(sc)}`,
+                    `li=${li ? li.getAttribute('data-guid') : 'none'}`,
+                    `activeEl=${document.activeElement ? document.activeElement.tagName + '#' + document.activeElement.id : 'none'}`,
+                    `virtualinputHasFocus=${!!viHasFocus}`,
+                );
+            } catch (err) {
+                console.log(`[ir-caret ${tag}] diagnostic failed`, err);
+            }
+        };
+        const onEnterDiagnostic = (e) => {
+            if (e.key !== 'Enter') return;
+            diagSnapshotSelection('keydown');
+            queueMicrotask(() => diagSnapshotSelection('microtask'));
+            requestAnimationFrame(() => {
+                diagSnapshotSelection('rAF1');
+                requestAnimationFrame(() => diagSnapshotSelection('rAF2'));
+            });
+            setTimeout(() => diagSnapshotSelection('timeout0'), 0);
+            setTimeout(() => diagSnapshotSelection('timeout30'), 30);
+        };
+        document.addEventListener('keydown', onEnterDiagnostic, true);
+        this.cleanupMethods.push(() => {
+            document.removeEventListener('keydown', onEnterDiagnostic, true);
+        });
+        // ===== /TEMP DIAGNOSTIC =====
+
         // Inject (or re-sync) the .bt-marker wrapper as the first child of
         // a .listitem. Transfers the marginLeft off whichever native child
         // currently holds it onto .bt-marker so indentation flow is
