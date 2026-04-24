@@ -815,14 +815,16 @@ body.ir-enabled.bt-bullets .item-drag-handle {
    Thymer's bottom-anchor from fighting our top. */
 body.ir-enabled.bt-toggles .item-drag-handle,
 body.ir-enabled.bt-bullets .item-drag-handle {
-    /* Pin the circle to the row's FIRST text baseline, matching where
-       .bt-marker's caret + bullet land. We measure from the top of
-       the row: 'top: calc(.5em - 13.5px)' puts the circle's vertical
-       center on the baseline of the first line's em-box (approx.
-       text baseline), regardless of the row's total height on
-       wrapped rows. 1em resolves to the listitem's own font-size, so
-       headings and body text both line up. */
-    top: calc(1em - 14.5px) !important;
+    /* Pin the circle to the row's FIRST text line, matching where
+       .bt-marker's caret + bullet land. Using 0.5lh gives us exactly
+       the vertical midline of the first line-box, which is what we
+       want on wrapped rows — NOT the midline of the whole (tall) row.
+       Subtracting half the circle's height (27px / 2 ≈ 13.5px) lands
+       the circle's center on that midline.
+       The lh unit resolves to the element's own computed line-height;
+       since .link-menu inherits line-height from the listitem, the
+       math is correct for headings, body, and wrapped rows alike. */
+    top: calc(0.5lh - 13.5px) !important;
     /* -24px previously produced an 11pt gap between the circle and
        the chevron; +5pt rightward (≈ 6.67px) closes that gap to the
        intended 6pt, matching the chevron↔bullet spacing. */
