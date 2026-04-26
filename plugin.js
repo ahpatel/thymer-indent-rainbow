@@ -827,17 +827,28 @@ body.ir-enabled .listitem.bt-zoom-start-line > .line-div {
    Caret-only popup reads [drag-handle][zoom] (54pt). Both-on popup
    reads [drag-handle] only (27pt; zoom is also hidden when bullets
    are on — see rule below), leaving the in-row .bt-caret unobstructed
-   to the right of the popup. */
-body.ir-enabled.bt-toggles .link-menu .link-menu-action-collapse,
-body.ir-enabled.bt-toggles .link-menu .link-menu-action-expand {
+   to the right of the popup.
+
+   Scoped via :has(> .item-drag-handle) so inline page-link popups
+   (which share the .link-menu class but anchor to a link, not a row)
+   keep their native action buttons intact. */
+body.ir-enabled.bt-toggles .link-menu:has(> .item-drag-handle) .link-menu-action-collapse,
+body.ir-enabled.bt-toggles .link-menu:has(> .item-drag-handle) .link-menu-action-expand {
     display: none !important;
 }
 
 /* Hide the native link-menu zoom arrow when our Workflowy bullets are
    active — clicking the bullet already zooms, so ↗ in the hover menu
    is redundant. Gated on bt-bullets so disabling the bullet setting
-   restores the native zoom affordance. */
-body.ir-enabled.bt-bullets .link-menu .link-menu-action-zoom {
+   restores the native zoom affordance.
+
+   Scoped via :has(> .item-drag-handle) so we ONLY hide the zoom on the
+   row-level link-menu (the one with the drag circle). Page-link inline
+   popups (the floating pill that appears when hovering an inline page
+   link with → | / ↗ buttons) reuse the .link-menu class but lack a
+   drag-handle child — without this scope our rule was killing the
+   useful 'Open / Open in other panel' affordance on page links. */
+body.ir-enabled.bt-bullets .link-menu:has(> .item-drag-handle) .link-menu-action-zoom {
     display: none !important;
 }
 
@@ -954,7 +965,7 @@ body.ir-enabled.bt-bullets .link-menu > .item-drag-handle {
    container. pointer-events: none on the container + auto on the
    drag-handle keeps the circle interactive while letting clicks on
    the caret column pass through to .bt-caret underneath. */
-body.ir-enabled.bt-toggles.bt-bullets .link-menu {
+body.ir-enabled.bt-toggles.bt-bullets .link-menu:has(> .item-drag-handle) {
     width: 27px !important;
     min-width: 27px !important;
     max-width: 27px !important;
@@ -970,9 +981,11 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu {
 }
 /* Kill any pseudo-element chrome (dashed outlines, highlight rings,
    etc.) the native stylesheet draws on .link-menu so only the
-   drag-handle's own circle remains visible in both-on. */
-body.ir-enabled.bt-toggles.bt-bullets .link-menu::before,
-body.ir-enabled.bt-toggles.bt-bullets .link-menu::after {
+   drag-handle's own circle remains visible in both-on. Same
+   :has(> .item-drag-handle) scope so inline page-link popups keep
+   their native pill chrome (background, border, shadow). */
+body.ir-enabled.bt-toggles.bt-bullets .link-menu:has(> .item-drag-handle)::before,
+body.ir-enabled.bt-toggles.bt-bullets .link-menu:has(> .item-drag-handle)::after {
     content: none !important;
     background: transparent !important;
     border: none !important;
