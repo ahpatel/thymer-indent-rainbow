@@ -3514,6 +3514,69 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             document.querySelectorAll('.link-menu').forEach(detachPerMenuObserver);
         });
 
+        // Prime Thymer's link-menu so our chevron / triggerNativeFold work
+        // from the first click. Thymer creates the popup lazily on first
+        // user hover; before that, document.querySelectorAll('.link-menu')
+        // returns empty and tryClickAction() inside triggerNativeFold
+        // silently fails. The user-visible symptom: "chevron doesn't fold
+        // until I use the native popup once first."
+        //
+        // Synthesize a hover sequence on the first visible .listitem at
+        // init. If Thymer accepts synthetic events (no isTrusted gate),
+        // it lazy-creates the link-menu and our captureNativeChevrons +
+        // triggerNativeFold immediately have the DOM they need. If
+        // Thymer's hover creation is gated on isTrusted, this is a safe
+        // no-op — we leave nothing visibly different (we leave() right
+        // after enter()). Either way, no regression on real user hover.
+        const primeLinkMenu = () => {
+            if (this.isUnloaded) return;
+            // Already primed — bail.
+            if (document.querySelector('.link-menu')) return;
+            const li = outlineTarget.querySelector('.listitem');
+            if (!li) return;
+            const r = li.getBoundingClientRect();
+            if (r.width === 0 || r.height === 0) return;
+            const cx = r.right - 10;
+            const cy = r.top + r.height / 2;
+            const opts = {
+                bubbles: true, cancelable: true, composed: true,
+                view: window, clientX: cx, clientY: cy,
+            };
+            const popts = Object.assign(
+                { pointerId: 1, pointerType: 'mouse', isPrimary: true },
+                opts,
+            );
+            const targets = [li, document.elementFromPoint(cx, cy)].filter(Boolean);
+            try {
+                for (const t of targets) {
+                    t.dispatchEvent(new PointerEvent('pointerover', popts));
+                    t.dispatchEvent(new PointerEvent('pointerenter', popts));
+                    t.dispatchEvent(new MouseEvent('mouseover', opts));
+                    t.dispatchEvent(new MouseEvent('mouseenter', opts));
+                    t.dispatchEvent(new PointerEvent('pointermove', popts));
+                    t.dispatchEvent(new MouseEvent('mousemove', opts));
+                }
+            } catch (_) {}
+            // Leave on the next tick so Thymer has time to react. We
+            // don't want the row visibly highlighted on session start.
+            setTimeout(() => {
+                if (this.isUnloaded) return;
+                try {
+                    for (const t of targets.slice().reverse()) {
+                        t.dispatchEvent(new MouseEvent('mouseleave', opts));
+                        t.dispatchEvent(new MouseEvent('mouseout', opts));
+                        t.dispatchEvent(new PointerEvent('pointerleave', popts));
+                        t.dispatchEvent(new PointerEvent('pointerout', popts));
+                    }
+                } catch (_) {}
+            }, 16);
+        };
+        // Run once shortly after the outline settles. The 1500ms delay
+        // matches the existing post-load outline init pass so we don't
+        // race the first row paint.
+        const primeTimer = setTimeout(primeLinkMenu, 1500);
+        this.cleanupMethods.push(() => clearTimeout(primeTimer));
+
         // ---------- GUID resolution + zoom ----------
         // Resolve the GUID of a .listitem. Try data-guid attrs first, then
         // fall back to index-in-flattened-record-tree.
