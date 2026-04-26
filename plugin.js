@@ -570,19 +570,25 @@ body.ir-enabled.bt-bullets.bt-toggles .bt-marker::before {
        top/bottom insets that land 28pt total around the marker
        midline; width is driven by extending the left inset so the
        drag circle (at left:-24px) falls inside. */
-    /* Asymmetric vertical insets shift the rectangle up so gaps around
-       the chevron/bullet read as 4.75pt on each side. Symmetric -3.5pt
-       insets measured 3pt top / 6.5pt bottom because the marker's
-       baseline-aligned box sits below the visible glyph center —
-       shifting the rect up by 1.75pt recenters it on the glyphs.
-       Left inset bumped from -22pt to -44pt after the cursor-placement
-       spike: the listitem now reserves 36px of padding-left for the
-       absolute marker, so the link-menu anchor (and its drag circle at
-       left:-90px) sits ~36px further from the marker than it did with
-       the inline-flow marker. -44pt = -22 (original visual margin
-       around drag circle) - 22 (compensate for padding-left's effect
-       on link-menu anchor) ≈ matches the new drag-gutter column. */
-    inset: -3pt -3pt -3.25pt -44pt;
+    /* Pin the rectangle to a FIXED 26px height anchored on the marker's
+       vertical midline. Pre-spike, the marker was inline-flex sized to
+       its 18px icon content; the original symmetric -3pt/-3.25pt insets
+       produced a ~26px-tall frame. After the spike, the marker grew to
+       height:1lh (~22px text line-height) so the same inset-based
+       sizing inflated the frame to ~30px. Switch to an explicit height
+       + center-anchor so the frame stays at the original height
+       regardless of marker box size. 13px = half of 26 (centers the
+       rectangle on the marker midline).
+       Left inset (-44pt) reaches across the gutter to wrap the drag
+       circle (left:-90px relative to link-menu, which Thymer anchors
+       at the listitem's content edge -- i.e. 36px right of the marker
+       after our padding-left:36 reserves the marker zone). Right inset
+       (-3pt) keeps the original 4.75pt visual margin past the bullet. */
+    top: calc(50% - 13px);
+    bottom: auto;
+    height: 26px;
+    left: -44pt;
+    right: -3pt;
     border-radius: 4pt;
     background: transparent;
     border: 1px solid transparent;
@@ -3377,7 +3383,19 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
         // drag-handle's presence can change between anchorings.
         const tagRowMenu = (linkMenu) => {
             if (!linkMenu || !linkMenu.querySelector) return;
-            const isRow = !!linkMenu.querySelector('.item-drag-handle');
+            // Broadened heuristic: any of the row-anchored native widgets
+            // is conclusive evidence that this is a row-menu. The original
+            // check was just .item-drag-handle, which missed brief windows
+            // where Thymer mounts the popup DOM (with its
+            // collapse/expand/zoom buttons) BEFORE the drag-handle lands
+            // -- in that window our hide rules didn't match, so the
+            // native zoom + chevron buttons were rendering inside the
+            // both-on hover frame next to our caret/bullet (image 1).
+            // Any of the four child types is unique to row-menus; inline
+            // page-link popups (which reuse .link-menu) have none of them.
+            const isRow = !!linkMenu.querySelector(
+                '.item-drag-handle, .link-menu-action-collapse, '
+                + '.link-menu-action-expand, .link-menu-action-zoom');
             linkMenu.classList.toggle('bt-row-menu', isRow);
         };
 
@@ -3392,10 +3410,39 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
         // The existing CSS rule remains as a fallback for the first paint
         // and for the rare case where the anchored row can't be resolved.
         const DRAG_HANDLE_RADIUS = 13.5; // half of 27px circle
+        // Measure the row's FIRST visible text line by walking to its
+        // first non-empty text node and reading the first rect from
+        // Range.getClientRects(). Returns { top, height } in viewport
+        // coords, or null if no measurable text was found. Range-based
+        // because getComputedStyle(row).lineHeight resolves to "normal"
+        // for many Thymer rows (especially headings / wrapped body
+        // text), which previously fell back to rowRect.height -- on
+        // wrapped rows that's the FULL multi-line box, so the
+        // computed firstLineMid landed at the row's vertical center
+        // and the drag-circle ended up dropped to mid-row (image 2).
+        const measureFirstTextLine = (row) => {
+            const lineDiv = row.querySelector(':scope > .line-div') || row;
+            const walker = document.createTreeWalker(
+                lineDiv, NodeFilter.SHOW_TEXT, {
+                    acceptNode: (n) => (n.nodeValue && n.nodeValue.trim())
+                        ? NodeFilter.FILTER_ACCEPT
+                        : NodeFilter.FILTER_REJECT,
+                });
+            const tn = walker.nextNode();
+            if (!tn) return null;
+            const range = document.createRange();
+            range.setStart(tn, 0);
+            range.setEnd(tn, tn.nodeValue.length);
+            const rects = range.getClientRects();
+            if (!rects || rects.length === 0) return null;
+            const r = rects[0];
+            if (r.height <= 0) return null;
+            return { top: r.top, height: r.height };
+        };
         const alignDragHandleToFirstLine = (linkMenu) => {
             if (!linkMenu || !linkMenu.isConnected) return;
             // CSS rules that pin the drag handle are gated on bt-toggles
-            // or bt-bullets — match so we don't override the native look.
+            // or bt-bullets -- match so we don't override the native look.
             if (!isEnabled) return;
             if (!isBulletsEnabled && !isTogglesEnabled) return;
             const handle = linkMenu.querySelector(':scope > .item-drag-handle');
@@ -3405,18 +3452,20 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             const row = document.querySelector(
                 `.listitem[data-guid="${CSS.escape(guid)}"]`);
             if (!row || !row.isConnected) return;
-            const rowRect = row.getBoundingClientRect();
             const menuRect = linkMenu.getBoundingClientRect();
-            if (rowRect.height === 0 || menuRect.height === 0) return;
-            // Resolve the row's line-height to a pixel value. `lineHeight:
-            // normal` falls back to the row's full box height (single-line
-            // rows) which is still correct: firstLineMid === rowMid.
-            const cs = getComputedStyle(row);
-            let lineHeightPx = parseFloat(cs.lineHeight);
-            if (!Number.isFinite(lineHeightPx) || lineHeightPx <= 0) {
-                lineHeightPx = rowRect.height;
+            if (menuRect.height === 0) return;
+            // Prefer the Range-based first-line measurement; fall back
+            // to the row's full box midline only when the row has no
+            // measurable text (rare: empty rows mid-creation).
+            let firstLineMidY;
+            const firstLine = measureFirstTextLine(row);
+            if (firstLine) {
+                firstLineMidY = firstLine.top + firstLine.height / 2;
+            } else {
+                const rowRect = row.getBoundingClientRect();
+                if (rowRect.height === 0) return;
+                firstLineMidY = rowRect.top + rowRect.height / 2;
             }
-            const firstLineMidY = rowRect.top + lineHeightPx / 2;
             const offsetTop = firstLineMidY - menuRect.top - DRAG_HANDLE_RADIUS;
             // Avoid layout thrash: skip re-writing when the value hasn't
             // changed meaningfully (sub-pixel noise on rapid repositions).
@@ -3456,7 +3505,11 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                 attributeFilter: ['style', 'data-guid'],
                 // childList so we re-tag on direct child changes (e.g.
                 // Thymer toggling action buttons in/out per anchor type).
+                // subtree so newer builds that wrap the drag-handle /
+                // action buttons in an inner container still trigger
+                // tagRowMenu when the row-anchored widgets land late.
                 childList: true,
+                subtree: true,
             });
             perMenuObservers.set(linkMenu, obs);
         };
