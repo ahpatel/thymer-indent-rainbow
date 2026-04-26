@@ -520,6 +520,23 @@ body.ir-enabled.bt-toggles .bt-marker {
     position: absolute;
     left: 0;
     top: 0;
+    /* Span the first text line so inline-flex align-items:center
+       puts caret + bullet on the row's first-line midline regardless
+       of font-size (body, headings, embeds). Replaces the previous
+       align-self:baseline + transform:translateY nudge that worked
+       only when the marker was inline-flex in the listitem's flow. */
+    height: 1lh;
+    /* Pin width to the reserved padding zone so caret+bullet keep a
+       stable column even on rows where the inline-flex would
+       otherwise shrink-wrap (e.g. leaf rows where caret is hidden,
+       producing a partial collapse + visual stack). */
+    width: 36px;
+    /* Override the inline-flow translateY(.25em) nudge from the
+       earlier .bt-marker rule (still active because rule order /
+       specificity match). With top:0 + height:1lh + flex centering,
+       no translation is needed. The heading-row align-self:center
+       override likewise becomes a no-op (absolute ignores align-self). */
+    transform: none;
 }
 /* ---------- end cursor-placement spike ---------- */
 
@@ -1057,7 +1074,14 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu.bt-row-menu .item-drag-handle {
        column); another 27px clears the full .bt-marker (caret 18px +
        gap 2px + bullet ~18px + padding/border ~4px). Tune if the
        rectangle's padding in the both-on marker rule changes. */
-    left: -54px !important;
+    /* Was -54px before the cursor-placement spike. With the listitem
+       now reserving 36px of padding-left for the absolute marker, the
+       link-menu (which Thymer anchors to the listitem's content edge,
+       i.e. AFTER our padding) sits 36px further right than it used to.
+       Adding another -36px (-54 - 36 = -90) keeps the drag circle in
+       the same drag-gutter column it occupied with the inline marker.
+       Tune in tandem if the listitem padding-left changes. */
+    left: -90px !important;
     /* Visual-only nudge: the hit-zone (set by 'left' above) is correct, but the painted ring sits ~20px too far right. transform shifts paint without touching layout, so the hit-zone stays put while the circle visually aligns with the drag-gutter. */
     transform: translateX(0px) !important;
 }
@@ -1969,11 +1993,14 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             let marker = li.firstElementChild;
             if (marker && marker.classList.contains('bt-marker')) {
                 // Marker already present — re-sync indent in case Thymer
-                // moved marginLeft back to a native child.
+                // moved marginLeft back to a native child. Indent now
+                // lives on the .listitem itself (not the marker) since
+                // the marker is position: absolute and can't shift
+                // siblings via margin (cursor-misplacement-fix-fd1558).
                 for (let i = 1; i < li.children.length; i++) {
                     const c = li.children[i];
                     if (c.style && c.style.marginLeft) {
-                        marker.style.marginLeft = c.style.marginLeft;
+                        li.style.marginLeft = c.style.marginLeft;
                         marker.dataset.btFromClass = c.className || '';
                         c.style.marginLeft = '';
                         break;
@@ -1999,11 +2026,18 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             marker.appendChild(caret);
             marker.appendChild(bullet);
 
-            // Transfer marginLeft from the first indent-carrying native child.
+            // Transfer marginLeft from the first indent-carrying native
+            // child onto the .listitem itself. We can't put it on the
+            // marker because the marker is position: absolute now
+            // (cursor-misplacement-fix-fd1558) and absolute elements
+            // don't push siblings via margin. Putting it on .listitem
+            // shifts the entire row (text + marker, since marker's
+            // containing block is the listitem's padding box) so the
+            // hierarchy still indents visually.
             for (let i = 0; i < li.children.length; i++) {
                 const c = li.children[i];
                 if (c.style && c.style.marginLeft) {
-                    marker.style.marginLeft = c.style.marginLeft;
+                    li.style.marginLeft = c.style.marginLeft;
                     marker.dataset.btFromClass = c.className || '';
                     c.style.marginLeft = '';
                     break;
@@ -2040,7 +2074,12 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             const marker = li.firstElementChild;
             if (!marker || !marker.classList?.contains('bt-marker')) return;
             const restoredTo = marker.dataset.btFromClass;
-            const ml = marker.style.marginLeft;
+            // Indent now lives on .listitem (see injectMarker comment).
+            // Fall back to marker.style.marginLeft for legacy markers
+            // injected before this change so an in-place plugin reload
+            // doesn't lose indent on rows whose marker was already
+            // present in the DOM.
+            const ml = li.style.marginLeft || marker.style.marginLeft;
             outlineMutating = true;
             if (ml) {
                 let restored = false;
@@ -2088,6 +2127,12 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                 // Last-ditch: pin it to the listitem itself so indentation
                 // is preserved even on a weird row with no usable child.
                 if (!restored) li.style.marginLeft = ml;
+                else if (li.style.marginLeft) {
+                    // We restored to a child; clear our temporary copy on
+                    // the listitem so it doesn't compound with the child's
+                    // newly-restored margin.
+                    li.style.marginLeft = '';
+                }
             }
             marker.remove();
             outlineMutating = false;
