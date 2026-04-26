@@ -606,7 +606,18 @@ body.ir-enabled.bt-bullets.bt-toggles.ir-hover-frame .listitem.bt-drag-hover > .
 body.ir-enabled .listitem:not(.listitem-text):not(.listitem-task):not(.listitem-ulist):not(.listitem-olist) > .bt-marker {
     align-self: center;
     vertical-align: middle;
-    transform: none;
+    /* Cursor-placement fix: marker is now position: absolute. Its
+       intrinsic 1lh height inherits the listitem's body line-height,
+       which is shorter than the heading text's line-height — so the
+       default top:0 + height:1lh combo lands the caret/bullet near
+       the heading's TOP, not its midline. Center via 50%/translateY
+       and let the marker auto-size to its caret+bullet content. Only
+       safe for single-line rows (headings don't wrap), so this rule
+       must stay scoped to heading rows; do NOT promote to body rows
+       which can wrap. */
+    top: 50% !important;
+    height: auto !important;
+    transform: translateY(-50%) !important;
 }
 
 /* Embed rows (image cards, link previews, video/iframe embeds,
@@ -3958,11 +3969,15 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                     // Full class sync (listitem-folded → bt-collapsed)
                     // happens via updateCaretIcon on the next outline
                     // pass once Thymer applies the native action.
+                    // Route through setCaretChevron so both render paths
+                    // stay consistent: in the native-clone path we swap
+                    // the cloned chevron node, and in the Tabler-fallback
+                    // path we toggle the icon-font classes. The previous
+                    // unconditional class-toggle piled `ti-chevron-right`
+                    // onto the wrapper while the cloned glyph was still
+                    // inside, double-rendering as a stray block.
                     const caretEl = li.querySelector(':scope > .bt-marker > .bt-caret');
-                    if (caretEl) {
-                        caretEl.classList.toggle('ti-chevron-down', !shouldCollapse);
-                        caretEl.classList.toggle('ti-chevron-right', shouldCollapse);
-                    }
+                    if (caretEl) setCaretChevron(caretEl, shouldCollapse);
                     triggerNativeFold(li, shouldCollapse);
                     // Let Thymer apply listitem-folded, then re-sync our
                     // mirror class + caret + has-children stickiness.
