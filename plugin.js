@@ -649,8 +649,35 @@ body.ir-enabled.bt-toggles .bt-marker > .bt-caret {
 }
 /* Force the Tabler ::before glyph to render as a zero-metrics block so
    its em-box is collapsed; grid's place-items then centers the glyph
-   by its inked dimensions instead of its baseline position. */
-body.ir-enabled .bt-caret::before {
+   by its inked dimensions instead of its baseline position. Only
+   applies in the Tabler-fallback render path (before the first
+   link-menu observation captures the native chevron clone). */
+body.ir-enabled .bt-caret.ti::before {
+    display: block;
+    line-height: 1;
+}
+/* Native-clone render path: when .bt-caret holds a cloned native
+   chevron node as its child (set by setCaretChevron), make the clone
+   fill the wrapper and inherit the wrapper's color / opacity. The
+   clone keeps its own native classes (.link-menu-action-collapse, ti,
+   ti-chevron-down, etc.), so its glyph renders via the same icon-font
+   stack Thymer uses in the popup. pointer-events: none ensures clicks
+   reach the wrapper, which is what triggerNativeFold listens on. */
+body.ir-enabled .bt-caret > * {
+    width: 100% !important;
+    height: 100% !important;
+    display: inline-grid !important;
+    place-items: center !important;
+    color: inherit !important;
+    font-size: inherit !important;
+    pointer-events: none !important;
+    /* Strip native button chrome so the clone is just the glyph. */
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+body.ir-enabled .bt-caret > *::before {
     display: block;
     line-height: 1;
 }
@@ -829,11 +856,13 @@ body.ir-enabled .listitem.bt-zoom-start-line > .line-div {
    are on — see rule below), leaving the in-row .bt-caret unobstructed
    to the right of the popup.
 
-   Scoped via :has(> .item-drag-handle) so inline page-link popups
-   (which share the .link-menu class but anchor to a link, not a row)
-   keep their native action buttons intact. */
-body.ir-enabled.bt-toggles .link-menu:has(> .item-drag-handle) .link-menu-action-collapse,
-body.ir-enabled.bt-toggles .link-menu:has(> .item-drag-handle) .link-menu-action-expand {
+   Scoped via JS-tagged .bt-row-menu (set by tagRowMenu in onLinkMenuAdded
+   and the per-menu observer) so inline page-link popups (which share the
+   .link-menu class but anchor to a link, not a row) keep their native
+   action buttons intact. Descendant matching survives Thymer wrapping
+   the drag-handle in newer builds. */
+body.ir-enabled.bt-toggles .link-menu.bt-row-menu .link-menu-action-collapse,
+body.ir-enabled.bt-toggles .link-menu.bt-row-menu .link-menu-action-expand {
     display: none !important;
 }
 
@@ -842,13 +871,13 @@ body.ir-enabled.bt-toggles .link-menu:has(> .item-drag-handle) .link-menu-action
    is redundant. Gated on bt-bullets so disabling the bullet setting
    restores the native zoom affordance.
 
-   Scoped via :has(> .item-drag-handle) so we ONLY hide the zoom on the
+   Scoped via JS-tagged .bt-row-menu so we ONLY hide the zoom on the
    row-level link-menu (the one with the drag circle). Page-link inline
    popups (the floating pill that appears when hovering an inline page
    link with → | / ↗ buttons) reuse the .link-menu class but lack a
-   drag-handle child — without this scope our rule was killing the
-   useful 'Open / Open in other panel' affordance on page links. */
-body.ir-enabled.bt-bullets .link-menu:has(> .item-drag-handle) .link-menu-action-zoom {
+   drag-handle — without this scope our rule was killing the useful
+   'Open / Open in other panel' affordance on page links. */
+body.ir-enabled.bt-bullets .link-menu.bt-row-menu .link-menu-action-zoom {
     display: none !important;
 }
 
@@ -924,10 +953,10 @@ body.ir-enabled.bt-bullets .item-drag-handle::after {
    previous transform-shift hacks that tried to reposition the drag-
    handle visually — unnecessary once each slot has a predictable
    width and the drag-handle is ordered first (see below). */
-body.ir-enabled .link-menu > .link-menu-action-zoom,
-body.ir-enabled .link-menu > .link-menu-action-collapse,
-body.ir-enabled .link-menu > .link-menu-action-expand,
-body.ir-enabled .link-menu > .item-drag-handle {
+body.ir-enabled .link-menu.bt-row-menu .link-menu-action-zoom,
+body.ir-enabled .link-menu.bt-row-menu .link-menu-action-collapse,
+body.ir-enabled .link-menu.bt-row-menu .link-menu-action-expand,
+body.ir-enabled .link-menu.bt-row-menu .item-drag-handle {
     flex: 0 0 27px !important;
     width: 27px !important;
     min-width: 27px !important;
@@ -946,8 +975,8 @@ body.ir-enabled .link-menu > .item-drag-handle {
    (see link-menu observer below) — CSS 'order' appeared to desync
    Thymer's hit-zone from the visible ring in some states, so we do
    a real reparent instead. */
-body.ir-enabled.bt-toggles .link-menu > .item-drag-handle,
-body.ir-enabled.bt-bullets .link-menu > .item-drag-handle {
+body.ir-enabled.bt-toggles .link-menu.bt-row-menu .item-drag-handle,
+body.ir-enabled.bt-bullets .link-menu.bt-row-menu .item-drag-handle {
     height: 27px !important;
 }
 
@@ -965,7 +994,7 @@ body.ir-enabled.bt-bullets .link-menu > .item-drag-handle {
    container. pointer-events: none on the container + auto on the
    drag-handle keeps the circle interactive while letting clicks on
    the caret column pass through to .bt-caret underneath. */
-body.ir-enabled.bt-toggles.bt-bullets .link-menu:has(> .item-drag-handle) {
+body.ir-enabled.bt-toggles.bt-bullets .link-menu.bt-row-menu {
     width: 27px !important;
     min-width: 27px !important;
     max-width: 27px !important;
@@ -982,16 +1011,16 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu:has(> .item-drag-handle) {
 /* Kill any pseudo-element chrome (dashed outlines, highlight rings,
    etc.) the native stylesheet draws on .link-menu so only the
    drag-handle's own circle remains visible in both-on. Same
-   :has(> .item-drag-handle) scope so inline page-link popups keep
-   their native pill chrome (background, border, shadow). */
-body.ir-enabled.bt-toggles.bt-bullets .link-menu:has(> .item-drag-handle)::before,
-body.ir-enabled.bt-toggles.bt-bullets .link-menu:has(> .item-drag-handle)::after {
+   .bt-row-menu scope so inline page-link popups keep their native
+   pill chrome (background, border, shadow). */
+body.ir-enabled.bt-toggles.bt-bullets .link-menu.bt-row-menu::before,
+body.ir-enabled.bt-toggles.bt-bullets .link-menu.bt-row-menu::after {
     content: none !important;
     background: transparent !important;
     border: none !important;
     box-shadow: none !important;
 }
-body.ir-enabled.bt-toggles.bt-bullets .link-menu > .item-drag-handle {
+body.ir-enabled.bt-toggles.bt-bullets .link-menu.bt-row-menu .item-drag-handle {
     pointer-events: auto !important;
     position: relative !important;
     /* Shift the drag circle all the way to the LEFT of the chevron.
@@ -1116,6 +1145,19 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty:hover > .bt-marker > .b
 body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker > .bt-caret {
     opacity: 0.55;
     transition: opacity 0.15s ease-in;
+}
+
+/* ---------- Print stylesheet ----------
+   Suppress all plugin-injected visuals when printing. The native
+   document content (text, lists, headings) remains; only our markers,
+   indent guides, and active-thread highlights are hidden so printed
+   output matches Thymer's default look. */
+@media print {
+    body.ir-enabled .bt-marker,
+    body.ir-enabled .listitem-indentline,
+    body.ir-enabled .bt-active-highlight {
+        display: none !important;
+    }
 }
 `;
 
@@ -2129,16 +2171,59 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             return items;
         };
 
-        // Swap the Tabler Icons class on the caret so its glyph matches
-        // the row's collapse state (down = expanded, right = collapsed).
-        // Thymer's own stylesheet supplies the ::before content for these
-        // classes, keeping us visually identical to the native chevrons.
+        // Sync the caret's chevron glyph with the row's collapse state
+        // (down = expanded, right = collapsed).
         //
-        // Source of truth is Thymer's `.listitem-folded` class (set by
-        // Thymer's fold mechanism). We also mirror that into our own
-        // `.bt-collapsed` styling hook here so CSS selectors keyed on
-        // `.bt-collapsed` (collapsed-bullet halo, sticky has-children)
-        // continue to work without having to update every selector.
+        // Two render paths, picked per-row based on whether we've yet
+        // observed Thymer's native .link-menu chevrons:
+        //   1. NATIVE-CLONE PATH (preferred, used after first link-menu
+        //      hover): empty the .bt-caret wrapper and append a deep
+        //      clone of the matching native chevron node so it renders
+        //      pixel-identical to Thymer's popup chevron.
+        //   2. TABLER-FALLBACK PATH (used before the first capture):
+        //      toggle `ti ti-chevron-down`/`ti-chevron-right` classes
+        //      on the wrapper itself; Thymer's stylesheet supplies the
+        //      ::before glyph via the icon font.
+        //
+        // Source of truth for fold state is Thymer's `.listitem-folded`
+        // class. We mirror that onto our own `.bt-collapsed` styling
+        // hook so CSS selectors keyed on `.bt-collapsed` (collapsed-
+        // bullet halo, sticky has-children) continue to work no matter
+        // how the fold was triggered (our chevron, native link-menu,
+        // Cmd+/, etc.).
+        const setCaretChevron = (caret, folded) => {
+            const wantState = folded ? 'expand' : 'collapse';
+            if (nativeChevronTemplate.collapse && nativeChevronTemplate.expand) {
+                // Native-clone path. Skip if already in correct state.
+                if (caret.dataset.btChevronState === wantState) return;
+                // Strip Tabler fallback classes so we don't double-render
+                // the icon-font ::before alongside the cloned glyph.
+                caret.classList.remove('ti', 'ti-chevron-down', 'ti-chevron-right');
+                while (caret.firstChild) caret.removeChild(caret.firstChild);
+                const clone = nativeChevronTemplate[wantState].cloneNode(true);
+                // re-sanitize the fresh clone (cloneNode of an already-
+                // sanitized template carries inline pointer-events:none
+                // forward, but be defensive in case the template was
+                // reset).
+                sanitizeChevronClone(clone);
+                caret.appendChild(clone);
+                caret.dataset.btChevronState = wantState;
+                return;
+            }
+            // Tabler fallback path.
+            delete caret.dataset.btChevronState;
+            if (!caret.classList.contains('ti')) caret.classList.add('ti');
+            const wantDown = !folded;
+            const hasDown = caret.classList.contains('ti-chevron-down');
+            const hasRight = caret.classList.contains('ti-chevron-right');
+            if (wantDown && !hasDown) {
+                caret.classList.remove('ti-chevron-right');
+                caret.classList.add('ti-chevron-down');
+            } else if (!wantDown && !hasRight) {
+                caret.classList.remove('ti-chevron-down');
+                caret.classList.add('ti-chevron-right');
+            }
+        };
         const updateCaretIcon = (li) => {
             if (!li || !li.classList?.contains('listitem')) return;
             const marker = li.firstElementChild;
@@ -2155,16 +2240,7 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             } else if (!folded && li.classList.contains('bt-collapsed')) {
                 li.classList.remove('bt-collapsed');
             }
-            const wantDown = !folded;
-            const hasDown = caret.classList.contains('ti-chevron-down');
-            const hasRight = caret.classList.contains('ti-chevron-right');
-            if (wantDown && !hasDown) {
-                caret.classList.remove('ti-chevron-right');
-                caret.classList.add('ti-chevron-down');
-            } else if (!wantDown && !hasRight) {
-                caret.classList.remove('ti-chevron-down');
-                caret.classList.add('ti-chevron-right');
-            }
+            setCaretChevron(caret, folded);
             // Keep the tooltip text synced with fold state (Collapse
             // when expanded, Expand when folded).
             applyMarkerTooltips(li);
@@ -3057,6 +3133,51 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             zoom: null,
         };
         const TOOLTIP_ATTRS = ['data-tooltip-html', 'data-tooltip-delay', 'data-tooltip-dir'];
+
+        // ----- Native chevron template capture -----
+        // Snapshot the actual DOM nodes Thymer uses for collapse / expand
+        // chevrons inside .link-menu, so we can clone them into each row's
+        // .bt-caret wrapper. This makes our in-row chevron render exactly
+        // like the native popup chevron (same Tabler classes, native color,
+        // native font metrics). Captured once on first observation; stays
+        // stable across hovers because Thymer reuses a single element.
+        const nativeChevronTemplate = {
+            collapse: null,
+            expand: null,
+        };
+        let chevronsCaptured = false;
+        const sanitizeChevronClone = (clone) => {
+            // Strip identity + interactivity attrs so the clone is inert
+            // visual chrome only; the wrapping .bt-caret takes the click.
+            // Keeping the native classes intact preserves Thymer's icon
+            // font ::before content + color tokens.
+            clone.removeAttribute('id');
+            clone.removeAttribute('style');
+            clone.classList.remove('tooltip');
+            for (const a of TOOLTIP_ATTRS) clone.removeAttribute(a);
+            // pointer-events: none so the clone never absorbs clicks; the
+            // outer .bt-caret wrapper handles the click → triggerNativeFold
+            // path. Also blocks the clone's own listeners (none typical,
+            // since cloneNode doesn't copy them, but defensive).
+            clone.style.pointerEvents = 'none';
+            return clone;
+        };
+        const captureNativeChevrons = (linkMenu) => {
+            if (!linkMenu || !linkMenu.querySelector) return false;
+            // Use descendant query so wrapped/reordered handles still match.
+            const c = linkMenu.querySelector('.link-menu-action-collapse');
+            const e = linkMenu.querySelector('.link-menu-action-expand');
+            let changed = false;
+            if (c && !nativeChevronTemplate.collapse) {
+                nativeChevronTemplate.collapse = sanitizeChevronClone(c.cloneNode(true));
+                changed = true;
+            }
+            if (e && !nativeChevronTemplate.expand) {
+                nativeChevronTemplate.expand = sanitizeChevronClone(e.cloneNode(true));
+                changed = true;
+            }
+            return changed;
+        };
         const snapshotTooltipAttrs = (btn) => {
             if (!btn) return null;
             const out = {};
@@ -3070,9 +3191,11 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
         let tooltipsCaptured = false;
         const captureNativeTooltips = (linkMenu) => {
             if (!linkMenu || !linkMenu.querySelector) return;
-            const c = linkMenu.querySelector(':scope > .link-menu-action-collapse');
-            const e = linkMenu.querySelector(':scope > .link-menu-action-expand');
-            const z = linkMenu.querySelector(':scope > .link-menu-action-zoom');
+            // Descendant queries so capture survives wrapped / re-ordered
+            // children (Thymer occasionally wraps these in newer builds).
+            const c = linkMenu.querySelector('.link-menu-action-collapse');
+            const e = linkMenu.querySelector('.link-menu-action-expand');
+            const z = linkMenu.querySelector('.link-menu-action-zoom');
             let changed = false;
             const cs = snapshotTooltipAttrs(c);
             if (cs) { nativeTooltipAttrs.collapse = cs; changed = true; }
@@ -3080,12 +3203,21 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             if (es) { nativeTooltipAttrs.expand = es; changed = true; }
             const zs = snapshotTooltipAttrs(z);
             if (zs) { nativeTooltipAttrs.zoom = zs; changed = true; }
+            // Snapshot the live chevron nodes for cloning into each row.
+            const chevronChanged = captureNativeChevrons(linkMenu);
             // First time we capture anything, re-apply across every row
-            // so in-flight markers pick up tooltips without waiting for
-            // the next caret-update / outline pass.
-            if (changed && !tooltipsCaptured) {
-                tooltipsCaptured = true;
-                document.querySelectorAll('.listitem').forEach(applyMarkerTooltips);
+            // so in-flight markers pick up tooltips + native chevron
+            // clones without waiting for the next caret-update / outline
+            // pass.
+            const firstTooltip = changed && !tooltipsCaptured;
+            const firstChevron = chevronChanged && !chevronsCaptured;
+            if (firstTooltip) tooltipsCaptured = true;
+            if (firstChevron) chevronsCaptured = true;
+            if (firstTooltip || firstChevron) {
+                document.querySelectorAll('.listitem').forEach((li) => {
+                    applyMarkerTooltips(li);
+                    if (firstChevron) updateCaretIcon(li);
+                });
             }
         };
 
@@ -3134,6 +3266,23 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             if (!handle) return;
             if (linkMenu.firstElementChild === handle) return;
             linkMenu.insertBefore(handle, linkMenu.firstElementChild);
+        };
+
+        // Tag link-menus that anchor to a row (i.e. contain a drag-handle
+        // somewhere inside) so our CSS overrides only apply to row-level
+        // menus, leaving inline page-link popups (which share the
+        // .link-menu class but lack a drag-handle) with their native
+        // pill chrome intact.
+        //
+        // Descendant query (not :scope > ...) so newer Thymer builds that
+        // wrap the drag-handle in an inner container still match.
+        // Re-evaluated on every per-menu observer callback because Thymer
+        // reuses a single .link-menu element across hovers and the
+        // drag-handle's presence can change between anchorings.
+        const tagRowMenu = (linkMenu) => {
+            if (!linkMenu || !linkMenu.querySelector) return;
+            const isRow = !!linkMenu.querySelector('.item-drag-handle');
+            linkMenu.classList.toggle('bt-row-menu', isRow);
         };
 
         // Pin the drag circle to the anchored row's FIRST-line midline via
@@ -3191,17 +3340,37 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             if (!linkMenu || perMenuObservers.has(linkMenu)) return;
             const obs = new MutationObserver(() => {
                 if (this.isUnloaded) return;
+                // Re-evaluate row-menu tagging on each callback. The
+                // attribute filter (style/data-guid) fires on every
+                // re-anchor, which is also when Thymer may have swapped
+                // children into / out of this reused element. Cheap.
+                tagRowMenu(linkMenu);
+                // Also opportunistically retry tooltip + chevron capture.
+                // Thymer's link-menu shows only collapse OR expand at a
+                // time depending on row state; both are usually present
+                // in DOM but if the first observation missed one, this
+                // re-anchor pass catches it.
+                if (!chevronsCaptured || !tooltipsCaptured) {
+                    captureNativeTooltips(linkMenu);
+                }
                 alignDragHandleToFirstLine(linkMenu);
             });
-            obs.observe(linkMenu, { attributes: true, attributeFilter: ['style', 'data-guid'] });
+            obs.observe(linkMenu, {
+                attributes: true,
+                attributeFilter: ['style', 'data-guid'],
+                // childList so we re-tag on direct child changes (e.g.
+                // Thymer toggling action buttons in/out per anchor type).
+                childList: true,
+            });
             perMenuObservers.set(linkMenu, obs);
         };
         const onLinkMenuAdded = (linkMenu) => {
             reorderLinkMenu(linkMenu);
+            tagRowMenu(linkMenu);
             attachPerMenuObserver(linkMenu);
-            // Harvest the native tooltip attributes off this menu's
-            // action buttons. First successful capture triggers a
-            // sweep across every existing .listitem's marker.
+            // Harvest the native tooltip attributes + chevron clones off
+            // this menu's action buttons. First successful capture triggers
+            // a sweep across every existing .listitem's marker.
             captureNativeTooltips(linkMenu);
             // rAF so Thymer's initial inline top/left are in place before
             // we measure (style is assigned after insertion in some paths).
@@ -3212,6 +3381,9 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             if (!obs) return;
             try { obs.disconnect(); } catch (_) {}
             perMenuObservers.delete(linkMenu);
+            // Strip our row-menu tag so a reused .link-menu doesn't
+            // carry stale state into the next observation cycle.
+            if (linkMenu.classList) linkMenu.classList.remove('bt-row-menu');
             // Also strip our inline overrides so a reused .link-menu
             // doesn't carry stale positioning into the next hover.
             const handle = linkMenu.querySelector
