@@ -3445,7 +3445,12 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             // or bt-bullets -- match so we don't override the native look.
             if (!isEnabled) return;
             if (!isBulletsEnabled && !isTogglesEnabled) return;
-            const handle = linkMenu.querySelector(':scope > .item-drag-handle');
+            // Descendant query so newer Thymer builds that wrap the
+            // drag-handle in an inner container still match. Earlier
+            // ':scope > .item-drag-handle' missed those builds, the
+            // function bailed early, and the drag-circle stayed at
+            // Thymer's native row-center position on wrapped rows.
+            const handle = linkMenu.querySelector('.item-drag-handle');
             if (!handle) return;
             const guid = linkMenu.getAttribute('data-guid');
             if (!guid) return;
@@ -3536,7 +3541,7 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             // Also strip our inline overrides so a reused .link-menu
             // doesn't carry stale positioning into the next hover.
             const handle = linkMenu.querySelector
-                ? linkMenu.querySelector(':scope > .item-drag-handle')
+                ? linkMenu.querySelector('.item-drag-handle')
                 : null;
             if (handle) {
                 handle.style.top = '';
