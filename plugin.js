@@ -494,6 +494,35 @@ body.ir-enabled.bt-toggles .bt-marker {
     display: inline-flex;
 }
 
+/* ---------- Cursor-placement spike (cursor-misplacement-fix-fd1558) ----------
+   Pull .bt-marker out of the listitem's inline content flow so Thymer's
+   virtual cursor at "row offset 0" lands at the start of actual text
+   (right of bullet column) instead of inside / before the marker. We
+   reserve space for the marker via padding-left on the listitem so the
+   text content visually shifts right of the absolutely-positioned
+   marker.
+
+   Premise: Thymer maps model offset -> screen pixel via
+   Range.getBoundingClientRect(). If true, range(listitem, 0) collapses
+   onto the listitem's content edge (post-padding) and the cursor
+   renders at correct text position.
+
+   If the spike fails (cursor still mis-positioned), revert this block
+   and the matching .bt-skip-panel override below. JS layer is
+   intentionally untouched so revert is a single git operation. */
+body.ir-enabled.bt-bullets .listitem,
+body.ir-enabled.bt-toggles .listitem {
+    position: relative;
+    padding-left: 36px;
+}
+body.ir-enabled.bt-bullets .bt-marker,
+body.ir-enabled.bt-toggles .bt-marker {
+    position: absolute;
+    left: 0;
+    top: 0;
+}
+/* ---------- end cursor-placement spike ---------- */
+
 /* Both-on mode: wrap [drag-circle | chevron | bullet] in a soft
    rectangle on row hover. Drawn as a ::before pseudo-element on
    .bt-marker, inflated to the left by 30px so it visually encloses
@@ -1043,6 +1072,10 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu.bt-row-menu .item-drag-handle {
    between a panel's creation and our refreshPanelScope pass.
 */
 .bt-skip-panel .bt-marker { display: none !important; }
+/* Spike paired override: zero out the cursor-placement padding-left
+   inside skip-panels so search / overview / custom panels keep their
+   native layout. */
+.bt-skip-panel .listitem { padding-left: 0 !important; }
 .bt-skip-panel .listitem-indentline {
     background: none !important;
     opacity: 0 !important;
