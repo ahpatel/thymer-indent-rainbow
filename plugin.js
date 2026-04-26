@@ -366,9 +366,22 @@ body.ir-enabled.bt-bullets {
    clears the hover frame's right edge. That margin also pushes the
    downstream indent-line to the right, so compensate here with an
    additional 5pt of leftward shift to keep the guides under the
-   bullets / numbers / chevrons. */
+   bullets / numbers / chevrons.
+   The 4.5pt rightward bump (-5pt + 4.5pt = -0.5pt net) lands the
+   guides directly under the bullet/number column after the
+   icon-cluster's 2px-left shift; without it the lines were drifting
+   left of the bullets. */
 body.ir-enabled.bt-bullets.bt-toggles {
-    --ir-bullet-shift: calc(-10px - 5pt);
+    --ir-bullet-shift: calc(-10px - 0.5pt);
+}
+
+/* Toggles-only mode (chevrons enabled, bullets disabled): the indent
+   line falls just left of the chevron's center. A 1pt rightward nudge
+   centers the line on the chevron's vertical axis. Distinct from the
+   bt-bullets variants -- those compensate for a moved bullet column
+   the user is looking at; here the chevron IS the visual landmark. */
+body.ir-enabled.bt-toggles:not(.bt-bullets) {
+    --ir-bullet-shift: 1pt;
 }
 
 /* Base: nudge applies to every indent line (catches headings + text + task). */
@@ -3453,19 +3466,23 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
         // and the drag-circle ended up dropped to mid-row (image 2).
         const measureFirstTextLine = (row) => {
             const lineDiv = row.querySelector(':scope > .line-div') || row;
-            const walker = document.createTreeWalker(
-                lineDiv, NodeFilter.SHOW_TEXT, {
-                    acceptNode: (n) => (n.nodeValue && n.nodeValue.trim())
-                        ? NodeFilter.FILTER_ACCEPT
-                        : NodeFilter.FILTER_REJECT,
-                });
-            const tn = walker.nextNode();
-            if (!tn) return null;
+            // selectNodeContents() over the WHOLE line-div + reading
+            // rects[0] returns the first visual line of the row's
+            // content -- regardless of whether that content starts
+            // with a text node, an inline element (page-link, mention,
+            // tag, etc.), or a mix. The previous TreeWalker approach
+            // hopped to the first non-empty text node, which on rows
+            // with leading inline elements landed on whatever line the
+            // text BEGAN, not necessarily line 1 (observed in image 1
+            // of the wrap-alignment report: the drag-circle sat at
+            // line 2 because the first text node started after a
+            // leading inline element that pushed it past line 1).
             const range = document.createRange();
-            range.setStart(tn, 0);
-            range.setEnd(tn, tn.nodeValue.length);
+            range.selectNodeContents(lineDiv);
             const rects = range.getClientRects();
             if (!rects || rects.length === 0) return null;
+            // rects[0] = first visual line box. Height is the line's
+            // computed line-height; top is the line's top edge.
             const r = rects[0];
             if (r.height <= 0) return null;
             return { top: r.top, height: r.height };
