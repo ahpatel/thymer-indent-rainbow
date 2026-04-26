@@ -584,9 +584,9 @@ body.ir-enabled.bt-bullets.bt-toggles .bt-marker::before {
        at the listitem's content edge -- i.e. 36px right of the marker
        after our padding-left:36 reserves the marker zone). Right inset
        (-3pt) keeps the original 4.75pt visual margin past the bullet. */
-    top: calc(50% - 14pt);
+    top: calc(50% - 15px);
     bottom: auto;
-    height: 28pt;
+    height: 30px;
     left: -44pt;
     right: -3pt;
     border-radius: 4pt;
