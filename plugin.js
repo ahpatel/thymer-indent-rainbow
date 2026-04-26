@@ -518,7 +518,12 @@ body.ir-enabled.bt-toggles .listitem {
 body.ir-enabled.bt-bullets .bt-marker,
 body.ir-enabled.bt-toggles .bt-marker {
     position: absolute;
-    left: 0;
+    /* --bt-indent mirrors Thymer's native marginLeft from the row's
+       indent-carrier child (set by syncIndentVar in JS). Falls back
+       to 0 for unindented rows. The marker tracks hierarchy depth via
+       this var instead of via marginLeft on the listitem, which kept
+       Thymer's native cursor position from desyncing on Tab. */
+    left: var(--bt-indent, 0px);
     top: 0;
     /* Span the first text line so inline-flex align-items:center
        puts caret + bullet on the row's first-line midline regardless
@@ -569,8 +574,15 @@ body.ir-enabled.bt-bullets.bt-toggles .bt-marker::before {
        the chevron/bullet read as 4.75pt on each side. Symmetric -3.5pt
        insets measured 3pt top / 6.5pt bottom because the marker's
        baseline-aligned box sits below the visible glyph center —
-       shifting the rect up by 1.75pt recenters it on the glyphs. */
-    inset: -3pt -3pt -3.25pt -22pt;
+       shifting the rect up by 1.75pt recenters it on the glyphs.
+       Left inset bumped from -22pt to -44pt after the cursor-placement
+       spike: the listitem now reserves 36px of padding-left for the
+       absolute marker, so the link-menu anchor (and its drag circle at
+       left:-90px) sits ~36px further from the marker than it did with
+       the inline-flow marker. -44pt = -22 (original visual margin
+       around drag circle) - 22 (compensate for padding-left's effect
+       on link-menu anchor) ≈ matches the new drag-gutter column. */
+    inset: -3pt -3pt -3.25pt -44pt;
     border-radius: 4pt;
     background: transparent;
     border: 1px solid transparent;
@@ -1931,11 +1943,11 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
         // bug pr-1 had for nested olists.
         const getItemIndent = (li) => {
             if (!li) return 0;
-            // After marker injection, .bt-marker holds the indent (transferred).
-            const marker = li.firstElementChild;
-            if (marker && marker.classList?.contains('bt-marker') && marker.style.marginLeft) {
-                return parseInt(marker.style.marginLeft) || 0;
-            }
+            // Indent is whatever Thymer left on the row's native
+            // indent-carrier child (.line-div / .line-check-div / etc).
+            // We mirror it onto --bt-indent for marker positioning but
+            // never mutate the source, so reading the child is the
+            // source of truth.
             for (let i = 0; i < li.children.length; i++) {
                 const c = li.children[i];
                 if (c.classList?.contains('bt-marker')) continue;
@@ -1943,6 +1955,13 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                     const v = parseInt(c.style.marginLeft) || 0;
                     if (v) return v;
                 }
+            }
+            // Defensive fallbacks for older marker DOM (legacy transfer
+            // path) and for the listitem-itself fallback that the prior
+            // commit used during the cursor-fix iteration.
+            const marker = li.firstElementChild;
+            if (marker && marker.classList?.contains('bt-marker') && marker.style.marginLeft) {
+                return parseInt(marker.style.marginLeft) || 0;
             }
             if (li.style && li.style.marginLeft) {
                 return parseInt(li.style.marginLeft) || 0;
@@ -1992,10 +2011,31 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             }
         };
 
+        // Mirror Thymer's native indent (inline marginLeft on the first
+        // indent-carrying child — typically .line-div, but check-div,
+        // bullet-div, and number-div all carry it on their respective
+        // row types) onto a CSS custom property on the .listitem. The
+        // absolute .bt-marker reads `--bt-indent` for its `left:` so
+        // the bullet column tracks hierarchy depth without us touching
+        // Thymer's marginLeft.
+        const syncIndentVar = (li) => {
+            if (!li) return;
+            for (let i = 0; i < li.children.length; i++) {
+                const c = li.children[i];
+                if (!c.classList || c.classList.contains('bt-marker')) continue;
+                if (c.style && c.style.marginLeft) {
+                    li.style.setProperty('--bt-indent', c.style.marginLeft);
+                    return;
+                }
+            }
+            // No indent-carrying child — clear the var so left:0 wins.
+            li.style.removeProperty('--bt-indent');
+        };
+
         // Inject (or re-sync) the .bt-marker wrapper as the first child of
-        // a .listitem. Transfers the marginLeft off whichever native child
-        // currently holds it onto .bt-marker so indentation flow is
-        // preserved without absolute positioning.
+        // a .listitem. Mirrors the row's native indent onto --bt-indent so
+        // the absolute marker tracks hierarchy depth without mutating
+        // Thymer's layout (cursor-misplacement-fix-fd1558).
         const injectMarker = (li) => {
             if (!li || !li.classList || !li.classList.contains('listitem')) return;
             // Skip any .listitem that lives inside a non-editor panel
@@ -2003,20 +2043,10 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             if (isInsideSkipPanel(li)) return;
             let marker = li.firstElementChild;
             if (marker && marker.classList.contains('bt-marker')) {
-                // Marker already present — re-sync indent in case Thymer
-                // moved marginLeft back to a native child. Indent now
-                // lives on the .listitem itself (not the marker) since
-                // the marker is position: absolute and can't shift
-                // siblings via margin (cursor-misplacement-fix-fd1558).
-                for (let i = 1; i < li.children.length; i++) {
-                    const c = li.children[i];
-                    if (c.style && c.style.marginLeft) {
-                        li.style.marginLeft = c.style.marginLeft;
-                        marker.dataset.btFromClass = c.className || '';
-                        c.style.marginLeft = '';
-                        break;
-                    }
-                }
+                // Marker already present — re-sync our --bt-indent mirror
+                // in case Thymer changed .line-div's marginLeft (Tab,
+                // Shift+Tab, drag-reorder, etc).
+                syncIndentVar(li);
                 return;
             }
             marker = document.createElement('span');
@@ -2037,25 +2067,26 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             marker.appendChild(caret);
             marker.appendChild(bullet);
 
-            // Transfer marginLeft from the first indent-carrying native
-            // child onto the .listitem itself. We can't put it on the
-            // marker because the marker is position: absolute now
-            // (cursor-misplacement-fix-fd1558) and absolute elements
-            // don't push siblings via margin. Putting it on .listitem
-            // shifts the entire row (text + marker, since marker's
-            // containing block is the listitem's padding box) so the
-            // hierarchy still indents visually.
-            for (let i = 0; i < li.children.length; i++) {
-                const c = li.children[i];
-                if (c.style && c.style.marginLeft) {
-                    li.style.marginLeft = c.style.marginLeft;
-                    marker.dataset.btFromClass = c.className || '';
-                    c.style.marginLeft = '';
-                    break;
-                }
-            }
+            // Mirror Thymer's native indent (which lives on .line-div
+            // or a sibling indent-carrier as inline marginLeft) onto a
+            // CSS custom property `--bt-indent` on the .listitem. The
+            // absolute marker reads it via `left: var(--bt-indent,0)`,
+            // so the bullet column tracks the row's hierarchy depth
+            // without us mutating Thymer's marginLeft.
+            //
+            // Why we DON'T transfer marginLeft anymore: pressing Tab
+            // makes Thymer set .line-div.marginLeft synchronously and
+            // render the cursor at the resulting (indented) text X.
+            // Our previous transfer (.line-div → .listitem) ran
+            // asynchronously via MutationObserver, AFTER Thymer's
+            // cursor render — the post-transfer layout shifted text
+            // back left but Thymer never re-measured the cursor, so
+            // the visual cursor stayed at the old (further-right) X.
+            // Mirroring via --bt-indent leaves Thymer's layout exactly
+            // as it set it, so the cursor never desyncs.
             outlineMutating = true;
             li.insertBefore(marker, li.firstElementChild);
+            syncIndentVar(li);
             outlineMutating = false;
             // Mirror Thymer's native rich tooltips (data-tooltip-html +
             // tooltip class) onto our new caret + bullet. No-op until
@@ -2084,30 +2115,26 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             if (!li) return;
             const marker = li.firstElementChild;
             if (!marker || !marker.classList?.contains('bt-marker')) return;
-            const restoredTo = marker.dataset.btFromClass;
-            // Indent now lives on .listitem (see injectMarker comment).
-            // Fall back to marker.style.marginLeft for legacy markers
-            // injected before this change so an in-place plugin reload
-            // doesn't lose indent on rows whose marker was already
-            // present in the DOM.
-            const ml = li.style.marginLeft || marker.style.marginLeft;
             outlineMutating = true;
-            if (ml) {
+            // Legacy cleanup: an older version of this plugin transferred
+            // marginLeft from .line-div onto either .bt-marker or .listitem.
+            // If a marker injected by that older code is still present at
+            // unload, restore the margin onto a native child and clear the
+            // temporaries so Thymer's layout returns to its untouched state.
+            const legacyMl = marker.style.marginLeft || li.style.marginLeft;
+            if (legacyMl) {
+                const restoredTo = marker.dataset.btFromClass;
                 let restored = false;
-                // Fast path: exact className match (Thymer hasn't touched
-                // the original carrier's classList since inject).
                 if (restoredTo) {
                     for (let i = 1; i < li.children.length; i++) {
                         const c = li.children[i];
                         if (c.className === restoredTo) {
-                            c.style.marginLeft = ml;
+                            c.style.marginLeft = legacyMl;
                             restored = true;
                             break;
                         }
                     }
                 }
-                // Fallback 1: any known indent-carrier child (matches the
-                // same class set injectMarker's transfer loop considers).
                 if (!restored) {
                     for (let i = 1; i < li.children.length; i++) {
                         const c = li.children[i];
@@ -2116,35 +2143,15 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                             || c.classList.contains('line-bullet-div')
                             || c.classList.contains('line-number-div')
                             || c.classList.contains('line-div')) {
-                            c.style.marginLeft = ml;
+                            c.style.marginLeft = legacyMl;
                             restored = true;
                             break;
                         }
                     }
                 }
-                // Fallback 2: first non-marker child — guarantees the
-                // margin survives the marker removal even if Thymer
-                // swapped in a carrier we don't recognize.
-                if (!restored) {
-                    for (let i = 1; i < li.children.length; i++) {
-                        const c = li.children[i];
-                        if (c.style) {
-                            c.style.marginLeft = ml;
-                            restored = true;
-                            break;
-                        }
-                    }
-                }
-                // Last-ditch: pin it to the listitem itself so indentation
-                // is preserved even on a weird row with no usable child.
-                if (!restored) li.style.marginLeft = ml;
-                else if (li.style.marginLeft) {
-                    // We restored to a child; clear our temporary copy on
-                    // the listitem so it doesn't compound with the child's
-                    // newly-restored margin.
-                    li.style.marginLeft = '';
-                }
+                if (li.style.marginLeft && restored) li.style.marginLeft = '';
             }
+            li.style.removeProperty('--bt-indent');
             marker.remove();
             outlineMutating = false;
         };
