@@ -561,6 +561,18 @@ body.ir-enabled.bt-toggles .bt-marker {
 body.ir-enabled.bt-bullets.bt-toggles .bt-marker {
     margin-right: 5pt;
 }
+/* Shift the caret+bullet cluster 2px (= ~2pt user) left within the
+   marker so the gap between the in-row icons and the drag-handle
+   reads visually even with the gap between caret and bullet. The
+   drag-handle's left:-67px override + this shift together place the
+   drag-handle's slot right edge 4px from the caret's left edge,
+   matching the 2px caret-to-bullet gap (with 2px of slot padding
+   accounting for the rest). transform on each child instead of on
+   the marker so the absolute ::before hover frame is unaffected. */
+body.ir-enabled.bt-bullets.bt-toggles .bt-marker > .bt-caret,
+body.ir-enabled.bt-bullets.bt-toggles .bt-marker > .bt-bullet {
+    transform: translateX(-2px);
+}
 body.ir-enabled.bt-bullets.bt-toggles .bt-marker::before {
     content: "";
     position: absolute;
@@ -587,7 +599,11 @@ body.ir-enabled.bt-bullets.bt-toggles .bt-marker::before {
     top: calc(50% - 15px);
     bottom: auto;
     height: 30px;
-    left: -44px;
+    /* -35px lands 4px left of the drag-handle's slot left edge
+       (drag-handle slot now at marker.left - 31 after we tightened
+       its left:-90 to -67). 4px wraps the visible ring with even
+       padding to match the right side. */
+    left: -35px;
     right: -4px;
     border-radius: 4pt;
     background: transparent;
@@ -596,7 +612,16 @@ body.ir-enabled.bt-bullets.bt-toggles .bt-marker::before {
     z-index: -1;
     transition: background-color 0.12s ease, border-color 0.12s ease;
 }
-body.ir-enabled.bt-bullets.bt-toggles.ir-hover-frame .listitem:hover > .bt-marker::before,
+/* Hover-frame paint is suppressed while the user is interacting via
+   keyboard. Thymer hides its native popup when the cursor moves with
+   keyboard shortcuts; mirror that on our hover frame so a stale
+   :hover state from before the keystroke doesn't leave the frame
+   painted on a row the user is no longer focused on visually.
+   bt-keyboard-active is toggled on body by the keyboard listener
+   below (added on keydown, cleared on the next mousemove).
+   bt-drag-hover stays unconditional -- if the user is dragging,
+   they're using the mouse, so the frame should always paint. */
+body.ir-enabled.bt-bullets.bt-toggles.ir-hover-frame:not(.bt-keyboard-active) .listitem:hover > .bt-marker::before,
 body.ir-enabled.bt-bullets.bt-toggles.ir-hover-frame .listitem.bt-drag-hover > .bt-marker::before {
     /* Paint an opaque fill that's *darker* than the page bg so the
        rectangle reads as a recessed surface (matches Thymer's native
@@ -1109,8 +1134,14 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu.bt-row-menu .item-drag-handle {
        i.e. AFTER our padding) sits 36px further right than it used to.
        Adding another -36px (-54 - 36 = -90) keeps the drag circle in
        the same drag-gutter column it occupied with the inline marker.
-       Tune in tandem if the listitem padding-left changes. */
-    left: -90px !important;
+       Tune in tandem if the listitem padding-left changes.
+       Bumped from -90 to -67 so the drag-handle's slot right edge
+       lands 4px left of the bt-caret's left edge (which is at
+       marker.left - 2px after the icon-cluster's 2px-left shift; see
+       the .bt-caret/.bt-bullet rule). 4px = 2px slot-padding +
+       2px visual gap, matching the gap between caret and bullet so
+       all three icons read as one evenly-spaced cluster. */
+    left: -67px !important;
     /* Visual-only nudge: the hit-zone (set by 'left' above) is correct, but the painted ring sits ~20px too far right. transform shifts paint without touching layout, so the hit-zone stays put while the circle visually aligns with the drag-gutter. */
     transform: translateX(0px) !important;
 }
@@ -4201,6 +4232,30 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
         document.addEventListener('selectionchange', onSelectionChange);
         this.cleanupMethods.push(() => {
             document.removeEventListener('selectionchange', onSelectionChange);
+        });
+
+        // Keyboard-active tracker. Toggle a body class on/off so the
+        // both-on hover-frame paint rule (gated on
+        // :not(.bt-keyboard-active) in CSS) suppresses while the user
+        // is navigating/typing. Mirrors Thymer's native popup, which
+        // hides on keyboard interaction. Cleared on the next mousemove
+        // so the frame restores as soon as the mouse moves -- with no
+        // movement the frame stays hidden, preventing a stale :hover
+        // state on a row the user moved away from with arrow keys.
+        const setKeyboardActive = () => {
+            if (this.isUnloaded) return;
+            document.body.classList.add('bt-keyboard-active');
+        };
+        const clearKeyboardActive = () => {
+            if (this.isUnloaded) return;
+            document.body.classList.remove('bt-keyboard-active');
+        };
+        document.addEventListener('keydown', setKeyboardActive, true);
+        document.addEventListener('mousemove', clearKeyboardActive, true);
+        this.cleanupMethods.push(() => {
+            document.removeEventListener('keydown', setKeyboardActive, true);
+            document.removeEventListener('mousemove', clearKeyboardActive, true);
+            document.body.classList.remove('bt-keyboard-active');
         });
 
         // Line-item created hook: when a new line is created while zoomed
