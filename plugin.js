@@ -587,8 +587,8 @@ body.ir-enabled.bt-bullets.bt-toggles .bt-marker::before {
     top: calc(50% - 15px);
     bottom: auto;
     height: 30px;
-    left: -44pt;
-    right: -3pt;
+    left: -44px;
+    right: -4px;
     border-radius: 4pt;
     background: transparent;
     border: 1px solid transparent;
