@@ -570,23 +570,23 @@ body.ir-enabled.bt-bullets.bt-toggles .bt-marker::before {
        top/bottom insets that land 28pt total around the marker
        midline; width is driven by extending the left inset so the
        drag circle (at left:-24px) falls inside. */
-    /* Pin the rectangle to a FIXED 26px height anchored on the marker's
-       vertical midline. Pre-spike, the marker was inline-flex sized to
-       its 18px icon content; the original symmetric -3pt/-3.25pt insets
-       produced a ~26px-tall frame. After the spike, the marker grew to
-       height:1lh (~22px text line-height) so the same inset-based
-       sizing inflated the frame to ~30px. Switch to an explicit height
-       + center-anchor so the frame stays at the original height
-       regardless of marker box size. 13px = half of 26 (centers the
+    /* Pin the rectangle to a FIXED 28pt height anchored on the marker's
+       vertical midline -- matches Thymer's native link-menu popup
+       height exactly. Previously sized via -3pt/-3.25pt insets off the
+       marker box; that worked when the marker was inline-flex (sized to
+       its 18px icon content) but inflated to ~30px after the marker
+       grew to height:1lh (~22px text line-height) in the cursor spike.
+       Explicit height + center-anchor keeps the frame at 28pt
+       regardless of marker box size. 14pt = half of 28 (centers the
        rectangle on the marker midline).
        Left inset (-44pt) reaches across the gutter to wrap the drag
        circle (left:-90px relative to link-menu, which Thymer anchors
        at the listitem's content edge -- i.e. 36px right of the marker
        after our padding-left:36 reserves the marker zone). Right inset
        (-3pt) keeps the original 4.75pt visual margin past the bullet. */
-    top: calc(50% - 13px);
+    top: calc(50% - 14pt);
     bottom: auto;
-    height: 26px;
+    height: 28pt;
     left: -44pt;
     right: -3pt;
     border-radius: 4pt;
