@@ -3490,43 +3490,82 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             if (r.height <= 0) return null;
             return { top: r.top, height: r.height };
         };
+        // Diagnostics gate. Set window.__irDragAlignDebug = true in the
+        // devtools console before hovering a wrapped row to surface why
+        // the drag-circle doesn't pin. Off by default so prod is silent.
+        const dbg = (...args) => {
+            try {
+                if (typeof window !== 'undefined' && window.__irDragAlignDebug) {
+                    console.log('[ir-drag-align]', ...args);
+                }
+            } catch (_) {}
+        };
         const alignDragHandleToFirstLine = (linkMenu) => {
-            if (!linkMenu || !linkMenu.isConnected) return;
+            if (!linkMenu || !linkMenu.isConnected) {
+                dbg('bail: linkMenu missing/disconnected', { linkMenu });
+                return;
+            }
             // CSS rules that pin the drag handle are gated on bt-toggles
             // or bt-bullets -- match so we don't override the native look.
-            if (!isEnabled) return;
-            if (!isBulletsEnabled && !isTogglesEnabled) return;
+            if (!isEnabled) { dbg('bail: !isEnabled'); return; }
+            if (!isBulletsEnabled && !isTogglesEnabled) {
+                dbg('bail: neither bullets nor toggles enabled');
+                return;
+            }
             // Descendant query so newer Thymer builds that wrap the
             // drag-handle in an inner container still match. Earlier
             // ':scope > .item-drag-handle' missed those builds, the
             // function bailed early, and the drag-circle stayed at
             // Thymer's native row-center position on wrapped rows.
             const handle = linkMenu.querySelector('.item-drag-handle');
-            if (!handle) return;
+            if (!handle) {
+                dbg('bail: no .item-drag-handle in linkMenu',
+                    { linkMenuHTML: linkMenu.outerHTML.slice(0, 300) });
+                return;
+            }
             const guid = linkMenu.getAttribute('data-guid');
-            if (!guid) return;
+            if (!guid) {
+                dbg('bail: linkMenu has no data-guid',
+                    { linkMenuClasses: linkMenu.className });
+                return;
+            }
             const row = document.querySelector(
                 `.listitem[data-guid="${CSS.escape(guid)}"]`);
-            if (!row || !row.isConnected) return;
+            if (!row || !row.isConnected) {
+                dbg('bail: row lookup failed', { guid });
+                return;
+            }
             const menuRect = linkMenu.getBoundingClientRect();
-            if (menuRect.height === 0) return;
+            if (menuRect.height === 0) {
+                dbg('bail: menuRect.height === 0', { menuRect });
+                return;
+            }
             // Prefer the Range-based first-line measurement; fall back
             // to the row's full box midline only when the row has no
             // measurable text (rare: empty rows mid-creation).
             let firstLineMidY;
+            let firstLineSource;
             const firstLine = measureFirstTextLine(row);
             if (firstLine) {
                 firstLineMidY = firstLine.top + firstLine.height / 2;
+                firstLineSource = 'measureFirstTextLine';
             } else {
                 const rowRect = row.getBoundingClientRect();
-                if (rowRect.height === 0) return;
+                if (rowRect.height === 0) {
+                    dbg('bail: rowRect.height === 0 + no firstLine');
+                    return;
+                }
                 firstLineMidY = rowRect.top + rowRect.height / 2;
+                firstLineSource = 'rowRect-fallback';
             }
             const offsetTop = firstLineMidY - menuRect.top - DRAG_HANDLE_RADIUS;
             // Avoid layout thrash: skip re-writing when the value hasn't
             // changed meaningfully (sub-pixel noise on rapid repositions).
             const prev = parseFloat(handle.style.top);
-            if (Number.isFinite(prev) && Math.abs(prev - offsetTop) < 0.5) return;
+            if (Number.isFinite(prev) && Math.abs(prev - offsetTop) < 0.5) {
+                dbg('skip: offsetTop unchanged', { prev, offsetTop });
+                return;
+            }
             // setProperty with 'important' so we beat the CSS fallback
             // rule's `top: calc(1em - 14.5px) !important`. Without the
             // 'important' on the inline write, plain handle.style.top
@@ -3536,6 +3575,23 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             // rows even though alignDragHandleToFirstLine ran cleanly.
             handle.style.setProperty('top', `${offsetTop}px`, 'important');
             handle.style.setProperty('bottom', 'auto', 'important');
+            dbg('wrote handle.style.top', {
+                guid, offsetTop, firstLineSource,
+                menuTop: menuRect.top,
+                firstLineMidY,
+                rowRectTop: row.getBoundingClientRect().top,
+                rowRectHeight: row.getBoundingClientRect().height,
+                computedTop: getComputedStyle(handle).top,
+                handleStyleTop: handle.style.top,
+            });
+            // Verify on next frame whether our write survived.
+            requestAnimationFrame(() => {
+                const after = getComputedStyle(handle).top;
+                dbg('post-rAF computedStyle.top', {
+                    after,
+                    handleStyleTop: handle.style.top,
+                });
+            });
         };
 
         // Per-menu style observer. Thymer re-uses a single `.link-menu`
