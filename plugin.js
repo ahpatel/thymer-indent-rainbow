@@ -2656,39 +2656,8 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                 const prevV = btn.style.visibility;
                 btn.style.setProperty('display', 'flex', 'important');
                 btn.style.setProperty('visibility', 'hidden', 'important');
-                // Reparent the action button INTO the target listitem
-                // for the duration of the synchronous click. Thymer's
-                // delegated click handler resolves the target row via
-                // e.target.closest('.listitem'); the action button
-                // normally lives inside the floating .link-menu which
-                // sits OUTSIDE any .listitem in the DOM, so
-                // closest('.listitem') returns null and Thymer's
-                // handler bails silently. Diagnostic trace confirmed
-                // this: the click reaches the button, but listitem-folded
-                // never flips and lineitem-btn-unfold never appears.
-                // Move the button into our target row, fire click
-                // (synchronous -- handler runs before we restore), then
-                // put the button back. The restore is unconditional
-                // (try/finally) so a throwing handler doesn't leave the
-                // popup permanently broken.
-                const origParent = btn.parentNode;
-                const origNext = btn.nextSibling;
-                fdbg('tryClickAction:click', {
-                    guid: ourGuid, action: actionClass,
-                    reparenting: !!origParent,
-                });
-                try {
-                    li.appendChild(btn);
-                    fullClick(btn);
-                } finally {
-                    if (origParent) {
-                        if (origNext && origNext.parentNode === origParent) {
-                            origParent.insertBefore(btn, origNext);
-                        } else {
-                            origParent.appendChild(btn);
-                        }
-                    }
-                }
+                fdbg('tryClickAction:click', { guid: ourGuid, action: actionClass });
+                fullClick(btn);
                 btn.style.display = prevD;
                 btn.style.visibility = prevV;
                 // Verify the fold actually landed on the target row.
@@ -3415,8 +3384,28 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
         const sanitizeChevronClone = (clone) => {
             // Strip identity + interactivity attrs so the clone is inert
             // visual chrome only; the wrapping .bt-caret takes the click.
-            // Keeping the native classes intact preserves Thymer's icon
-            // font ::before content + color tokens.
+            // Keeping the native Tabler classes (.ti, .ti-chevron-down,
+            // .ti-chevron-right) intact preserves Thymer's icon-font
+            // ::before content + color tokens. We DO strip the
+            // .link-menu-action-collapse / -expand classes -- those
+            // identify a clone as a "real" action button to global
+            // selectors, and our chevron clones live inside .bt-caret
+            // (not .link-menu) where they should be inert visual chrome.
+            // Without the strip, document.querySelector(
+            // '.link-menu-action-collapse') returns ~one-per-parent-row
+            // matches, which made primeLinkMenu's haveActions check
+            // short-circuit ("already in DOM, skip") and synthHandleHover
+            // never fired on row transitions. Thymer caches the hovered
+            // row on real drag-icon hover events; our synth-hover ride
+            // tries to keep that cache fresh so caret-click folds land
+            // on the correct row. With the haveActions check tripping
+            // on our own clones, the cache stayed stale and Thymer's
+            // click handler resolved against the wrong (or null) row,
+            // silently no-opping the fold.
+            clone.classList.remove(
+                'link-menu-action-collapse',
+                'link-menu-action-expand',
+            );
             clone.removeAttribute('id');
             clone.removeAttribute('style');
             clone.classList.remove('tooltip');
@@ -3941,8 +3930,12 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             if (this.isUnloaded) return;
             // If action buttons are already in DOM, no synthesis
             // needed -- caret click will find them via tryClickAction.
+            // Scope to inside .link-menu so we don't get false-positive
+            // hits on our own cloned chevrons (we strip the action
+            // classes off clones in sanitizeChevronClone, but check
+            // narrowly here as defense-in-depth).
             const haveActions =
-                !!document.querySelector('.link-menu-action-collapse');
+                !!document.querySelector('.link-menu .link-menu-action-collapse');
             if (haveActions) return;
             const ok = synthHandleHover();
             if (!ok || skipLeave) return;
