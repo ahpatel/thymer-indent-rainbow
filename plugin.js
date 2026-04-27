@@ -2445,9 +2445,30 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
         // Both paths route through Thymer's own fold mechanism, so
         // arrow-key navigation stays in sync with the folded state (the
         // plugin SDK exposes no direct collapse API on PluginLineItem).
+        //
+        // Diagnostics gate. Set window.__irFoldDebug = true in the
+        // devtools console before clicking a caret to trace the fold
+        // path: which menu/button got picked, what state was overridden,
+        // and whether listitem-folded / lineitem-btn-unfold actually
+        // landed afterward. Off by default so prod is silent.
+        const fdbg = (...args) => {
+            try {
+                if (typeof window !== 'undefined' && window.__irFoldDebug) {
+                    console.log('[ir-fold]', ...args);
+                }
+            } catch (_) {}
+        };
         const triggerNativeFold = (li, shouldCollapse) => {
             if (!li || !li.classList) return;
             const lineDiv = li.querySelector(':scope > .line-div') || li;
+            const liGuid = li.getAttribute('data-guid') || '';
+            fdbg('triggerNativeFold:enter', {
+                guid: liGuid,
+                shouldCollapse,
+                pre_listitem_folded: li.classList.contains('listitem-folded'),
+                pre_bt_collapsed: li.classList.contains('bt-collapsed'),
+                pre_unfold_btn: !!li.querySelector('.lineitem-btn-unfold'),
+            });
 
             // Full synthetic click sequence: pointerdown/mousedown → up →
             // click. Some handlers bind on mousedown instead of click,
@@ -2480,6 +2501,7 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                 const unfoldBtn = lineDiv.querySelector(':scope > .lineitem-btn-unfold')
                     || li.querySelector('.lineitem-btn-unfold');
                 if (unfoldBtn) {
+                    fdbg('triggerNativeFold:expand fast-path', { guid: liGuid });
                     fullClick(unfoldBtn);
                     return;
                 }
@@ -2549,11 +2571,17 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                     const inline = lineDiv.querySelector(':scope > .lineitem-btn-unfold')
                         || li.querySelector('.lineitem-btn-unfold');
                     if (inline) {
+                        fdbg('tryClickAction:expand via inline-unfold', { guid: liGuid });
                         fullClick(inline);
                         return true;
                     }
                 }
                 const menus = document.querySelectorAll('.link-menu');
+                fdbg('tryClickAction:menu scan', {
+                    actionClass,
+                    menuCount: menus.length,
+                    menuGuids: Array.from(menus).map(m => m.getAttribute('data-guid') || '(none)'),
+                });
                 // Pick the first menu that actually has the action
                 // button we want. The menu's DOM position doesn't
                 // matter — Thymer anchors by `data-guid`, which we
@@ -2580,9 +2608,17 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                             || btn.closest('[class*="popup"]')
                             || btn.closest('[class*="menu"]')
                             || btn.parentElement;
+                        fdbg('tryClickAction:doc-wide fallback found btn', {
+                            menuClasses: menu && menu.className,
+                        });
                     }
                 }
-                if (!menu || !btn) return false;
+                if (!menu || !btn) {
+                    fdbg('tryClickAction:bail no menu/btn', {
+                        haveMenu: !!menu, haveBtn: !!btn,
+                    });
+                    return false;
+                }
                 // Thymer's click handler appears to gate on four pieces
                 // of anchor state:
                 //   - `.link-menu-visible` class on the menu
@@ -2602,6 +2638,11 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                 const bodyWasOpen = document.body.classList.contains('editor-drag-handle-open');
                 const prevTop = menu.style.top;
                 const prevLeft = menu.style.left;
+                fdbg('tryClickAction:pre-override', {
+                    ourGuid, prevGuid, guidMatch: prevGuid === ourGuid,
+                    menuWasVisible, bodyWasOpen,
+                    btnSnippet: btn.outerHTML.slice(0, 200),
+                });
                 if (ourGuid && prevGuid !== ourGuid) menu.setAttribute('data-guid', ourGuid);
                 if (!menuWasVisible) menu.classList.add('link-menu-visible');
                 if (!bodyWasOpen) document.body.classList.add('editor-drag-handle-open');
@@ -2615,9 +2656,32 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                 const prevV = btn.style.visibility;
                 btn.style.setProperty('display', 'flex', 'important');
                 btn.style.setProperty('visibility', 'hidden', 'important');
+                fdbg('tryClickAction:click', { guid: ourGuid, action: actionClass });
                 fullClick(btn);
                 btn.style.display = prevD;
                 btn.style.visibility = prevV;
+                // Verify the fold actually landed on the target row.
+                // 50ms catches synchronous handlers; 250ms catches
+                // Thymer's async fold handling. If listitem-folded
+                // doesn't match shouldCollapse afterward, Thymer's
+                // click handler either ignored our event (isTrusted
+                // gate) or resolved to a different row (cached anchor
+                // not updated by synthetic hover).
+                const checkFold = (label, delayMs) => setTimeout(() => {
+                    if (!li.isConnected) return;
+                    fdbg('tryClickAction:post-click check ' + label, {
+                        guid: ourGuid,
+                        listitem_folded: li.classList.contains('listitem-folded'),
+                        bt_collapsed: li.classList.contains('bt-collapsed'),
+                        unfold_btn: !!li.querySelector('.lineitem-btn-unfold'),
+                        match_target: li.classList.contains('listitem-folded') === shouldCollapse,
+                    });
+                }, delayMs);
+                if (typeof window !== 'undefined' && window.__irFoldDebug) {
+                    checkFold('50ms', 50);
+                    checkFold('250ms', 250);
+                    checkFold('500ms', 500);
+                }
                 // Restore any state we forced. Thymer will re-apply on
                 // its next hover update, so we leave things clean.
                 if (!menuWasVisible) menu.classList.remove('link-menu-visible');
@@ -3783,20 +3847,32 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             // row's right edge as a coarser hover-summon.
             let target = document.querySelector('[class*="item-drag-handle"]');
             let cx, cy;
+            const targetSource = target ? 'drag-handle' : 'listitem-fallback';
             if (target) {
                 const r = target.getBoundingClientRect();
-                if (r.width === 0 || r.height === 0) return false;
+                if (r.width === 0 || r.height === 0) {
+                    fdbg('synthHandleHover:bail handle 0-dim');
+                    return false;
+                }
                 cx = r.left + r.width / 2;
                 cy = r.top + r.height / 2;
             } else {
                 const li = outlineTarget.querySelector('.listitem');
-                if (!li) return false;
+                if (!li) {
+                    fdbg('synthHandleHover:bail no listitem');
+                    return false;
+                }
                 const r = li.getBoundingClientRect();
-                if (r.width === 0 || r.height === 0) return false;
+                if (r.width === 0 || r.height === 0) {
+                    fdbg('synthHandleHover:bail listitem 0-dim');
+                    return false;
+                }
                 target = li;
                 cx = r.right - 10;
                 cy = r.top + r.height / 2;
             }
+            const preActions = document.querySelectorAll(
+                '.link-menu-action-collapse').length;
             const opts = {
                 bubbles: true, cancelable: true, composed: true,
                 view: window, clientX: cx, clientY: cy,
@@ -3817,6 +3893,12 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                     t.dispatchEvent(new MouseEvent('mousemove', opts));
                 }
             } catch (_) {}
+            const postActions = document.querySelectorAll(
+                '.link-menu-action-collapse').length;
+            fdbg('synthHandleHover:done', {
+                targetSource, preActions, postActions,
+                actionsAppeared: postActions > preActions,
+            });
             return true;
         };
 
@@ -4356,6 +4438,16 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                     // our clicks. Driving off listitem-folded keeps
                     // the direction right across all entry points.
                     const shouldCollapse = !li.classList.contains('listitem-folded');
+                    fdbg('caret-click', {
+                        guid: li.getAttribute('data-guid'),
+                        shouldCollapse,
+                        isTrusted: e.isTrusted,
+                        link_menu_count: document.querySelectorAll('.link-menu').length,
+                        action_collapse_count: document.querySelectorAll(
+                            '.link-menu-action-collapse').length,
+                        action_expand_count: document.querySelectorAll(
+                            '.link-menu-action-expand').length,
+                    });
                     // Optimistic chevron glyph flip for responsiveness.
                     // Full class sync (listitem-folded → bt-collapsed)
                     // happens via updateCaretIcon on the next outline
