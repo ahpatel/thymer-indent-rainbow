@@ -2560,7 +2560,25 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                     const b = m.querySelector(actionClass);
                     if (b) { menu = m; btn = b; break; }
                 }
-                if (!menu) return false;
+                // Document-wide fallback. In current Thymer builds
+                // the .link-menu element is collapsed onto the
+                // drag-handle and may not contain the action buttons
+                // until the user clicks the drag-handle to open a
+                // sub-popup. The action button often still exists
+                // somewhere in the DOM (e.g. detached popup, hidden
+                // panel) -- search globally and walk up to a
+                // reasonable container so the link-menu-visible /
+                // data-guid override below has somewhere to land.
+                if (!btn) {
+                    btn = document.querySelector(actionClass);
+                    if (btn) {
+                        menu = btn.closest('.link-menu')
+                            || btn.closest('[class*="popup"]')
+                            || btn.closest('[class*="menu"]')
+                            || btn.parentElement;
+                    }
+                }
+                if (!menu || !btn) return false;
                 // Thymer's click handler appears to gate on four pieces
                 // of anchor state:
                 //   - `.link-menu-visible` class on the menu
@@ -3787,11 +3805,55 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                 } catch (_) {}
             }, 16);
         };
-        // Run once shortly after the outline settles. The 1500ms delay
-        // matches the existing post-load outline init pass so we don't
-        // race the first row paint.
-        const primeTimer = setTimeout(primeLinkMenu, 1500);
-        this.cleanupMethods.push(() => clearTimeout(primeTimer));
+        // Run shortly after the outline settles, and again as a
+        // safety retry. Some Thymer builds gate hover-popup creation
+        // on isTrusted -- in those builds primeLinkMenu is a no-op
+        // and the user must perform a real hover before bt-caret
+        // clicks can find the action button. The retry catches the
+        // case where the first attempt raced the editor's first
+        // paint or its row-tree population.
+        const primeTimer1 = setTimeout(primeLinkMenu, 1500);
+        const primeTimer2 = setTimeout(primeLinkMenu, 4000);
+        this.cleanupMethods.push(() => {
+            clearTimeout(primeTimer1);
+            clearTimeout(primeTimer2);
+        });
+        // Latch onto the FIRST real user mouse interaction in the
+        // editor and ride it to summon the link-menu. Real events
+        // are isTrusted=true, so even if Thymer's hover popup is
+        // gated on trusted events, this hooks into the user's own
+        // movement to prime the menu before they ever click the
+        // bt-caret -- avoiding the "click drag-icon first" gotcha.
+        let primedByRealHover = false;
+        const onFirstRealHover = (e) => {
+            if (primedByRealHover) return;
+            if (!e.isTrusted) return;
+            // Skip if menu is already there (other code primed it).
+            if (document.querySelector('.link-menu')) {
+                primedByRealHover = true;
+                outlineTarget.removeEventListener('pointermove', onFirstRealHover, true);
+                outlineTarget.removeEventListener('mouseover', onFirstRealHover, true);
+                return;
+            }
+            // Run our synthetic hover NOW. Thymer's state machine
+            // already has fresh real-event input pending, so the
+            // synthetic enter we dispatch lands in a hover-receptive
+            // moment.
+            primeLinkMenu();
+            // If the link-menu appeared, latch off so we don't
+            // re-fire on every mousemove.
+            if (document.querySelector('.link-menu')) {
+                primedByRealHover = true;
+                outlineTarget.removeEventListener('pointermove', onFirstRealHover, true);
+                outlineTarget.removeEventListener('mouseover', onFirstRealHover, true);
+            }
+        };
+        outlineTarget.addEventListener('pointermove', onFirstRealHover, true);
+        outlineTarget.addEventListener('mouseover', onFirstRealHover, true);
+        this.cleanupMethods.push(() => {
+            outlineTarget.removeEventListener('pointermove', onFirstRealHover, true);
+            outlineTarget.removeEventListener('mouseover', onFirstRealHover, true);
+        });
 
         // ---------- GUID resolution + zoom ----------
         // Resolve the GUID of a .listitem. Try data-guid attrs first, then
