@@ -3926,17 +3926,21 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
         // normally fires 16ms after the enter -- used by the runtime
         // per-row-transition path so we don't un-summon the action
         // buttons we just primed while the user is still hovering.
+        //
+        // The original implementation gated synthesis on "are action
+        // buttons already in DOM" -- the rationale was that current
+        // Thymer creates the link-menu lazily and synthesis was only
+        // needed to summon it. But current builds keep the link-menu
+        // (and its action buttons) PERMANENTLY in the DOM, so the
+        // gate always tripped and synthesis stopped firing on row
+        // transitions. The actual purpose of synthesis at runtime is
+        // to keep Thymer's JS-cached hovered-row reference fresh so
+        // caret-clicks fold the right row -- not to make the buttons
+        // exist. So no gate; just dispatch every time. Cost is a
+        // handful of synthetic pointer events per row transition,
+        // which is cheap.
         const primeLinkMenu = (skipLeave = false) => {
             if (this.isUnloaded) return;
-            // If action buttons are already in DOM, no synthesis
-            // needed -- caret click will find them via tryClickAction.
-            // Scope to inside .link-menu so we don't get false-positive
-            // hits on our own cloned chevrons (we strip the action
-            // classes off clones in sanitizeChevronClone, but check
-            // narrowly here as defense-in-depth).
-            const haveActions =
-                !!document.querySelector('.link-menu .link-menu-action-collapse');
-            if (haveActions) return;
             const ok = synthHandleHover();
             if (!ok || skipLeave) return;
             // Init-time path: leave on the next tick so we don't
@@ -4484,8 +4488,16 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                     // onto the wrapper while the cloned glyph was still
                     // inside, double-rendering as a stray block.
                     const caretEl = li.querySelector(':scope > .bt-marker > .bt-caret');
-                    if (caretEl) setCaretChevron(caretEl, shouldCollapse);
-                    triggerNativeFold(li, shouldCollapse);
+                    try {
+                        if (caretEl) setCaretChevron(caretEl, shouldCollapse);
+                    } catch (err) {
+                        fdbg('setCaretChevron:threw', { err: String(err), stack: err && err.stack });
+                    }
+                    try {
+                        triggerNativeFold(li, shouldCollapse);
+                    } catch (err) {
+                        fdbg('triggerNativeFold:threw', { err: String(err), stack: err && err.stack });
+                    }
                     // Direct-DOM fallback. Diagnostic confirmed
                     // current Thymer build keeps the action buttons
                     // permanently in the link-menu (display:none) but
