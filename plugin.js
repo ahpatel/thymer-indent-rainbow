@@ -1004,8 +1004,8 @@ body.ir-enabled.bt-bullets .link-menu.bt-row-menu .link-menu-action-zoom {
    (Thymer keeps its position: absolute), so the hover menu continues
    to follow the cursor. display: none on the SVG removes it from the
    flex flow so the ::after is the sole centered child. */
-body.ir-enabled.bt-toggles .item-drag-handle,
-body.ir-enabled.bt-bullets .item-drag-handle {
+body.ir-enabled.bt-toggles [class*="item-drag-handle"],
+body.ir-enabled.bt-bullets [class*="item-drag-handle"] {
     display: flex !important;
     align-items: center;
     justify-content: center;
@@ -1027,8 +1027,8 @@ body.ir-enabled.bt-bullets .item-drag-handle {
    the full row box, not its top) — pure CSS can't recover from that
    since we don't know the delta statically. JS inline top naturally
    wins over this calc. */
-body.ir-enabled.bt-toggles .item-drag-handle,
-body.ir-enabled.bt-bullets .item-drag-handle {
+body.ir-enabled.bt-toggles [class*="item-drag-handle"],
+body.ir-enabled.bt-bullets [class*="item-drag-handle"] {
     /* Pin the circle to the row's FIRST text baseline, matching where
        .bt-marker's caret + bullet land. We measure from the top of
        the row: 'top: calc(.5em - 13.5px)' puts the circle's vertical
@@ -1047,16 +1047,16 @@ body.ir-enabled.bt-bullets .item-drag-handle {
        stacking context) doesn't cover the drag circle. */
     z-index: 12 !important;
 }
-body.ir-enabled.bt-toggles .item-drag-handle .handle-fold-icon,
-body.ir-enabled.bt-bullets .item-drag-handle .handle-fold-icon {
+body.ir-enabled.bt-toggles [class*="item-drag-handle"] .handle-fold-icon,
+body.ir-enabled.bt-bullets [class*="item-drag-handle"] .handle-fold-icon {
     display: none;
 }
 /* No inner glyph — match native drag circle (dashed ring, empty
    interior). The ::after remains declared so Thymer's own fold-icon
    SVG stays hidden via display:none above without anything else
    jumping in to fill the circle. */
-body.ir-enabled.bt-toggles .item-drag-handle::after,
-body.ir-enabled.bt-bullets .item-drag-handle::after {
+body.ir-enabled.bt-toggles [class*="item-drag-handle"]::after,
+body.ir-enabled.bt-bullets [class*="item-drag-handle"]::after {
     content: none;
 }
 
@@ -1072,7 +1072,8 @@ body.ir-enabled.bt-bullets .item-drag-handle::after {
 body.ir-enabled .link-menu.bt-row-menu .link-menu-action-zoom,
 body.ir-enabled .link-menu.bt-row-menu .link-menu-action-collapse,
 body.ir-enabled .link-menu.bt-row-menu .link-menu-action-expand,
-body.ir-enabled .link-menu.bt-row-menu .item-drag-handle {
+body.ir-enabled .link-menu.bt-row-menu[class*="item-drag-handle"],
+body.ir-enabled .link-menu.bt-row-menu [class*="item-drag-handle"] {
     flex: 0 0 27px !important;
     width: 27px !important;
     min-width: 27px !important;
@@ -1091,8 +1092,10 @@ body.ir-enabled .link-menu.bt-row-menu .item-drag-handle {
    (see link-menu observer below) — CSS 'order' appeared to desync
    Thymer's hit-zone from the visible ring in some states, so we do
    a real reparent instead. */
-body.ir-enabled.bt-toggles .link-menu.bt-row-menu .item-drag-handle,
-body.ir-enabled.bt-bullets .link-menu.bt-row-menu .item-drag-handle {
+body.ir-enabled.bt-toggles .link-menu.bt-row-menu[class*="item-drag-handle"],
+body.ir-enabled.bt-bullets .link-menu.bt-row-menu[class*="item-drag-handle"],
+body.ir-enabled.bt-toggles .link-menu.bt-row-menu [class*="item-drag-handle"],
+body.ir-enabled.bt-bullets .link-menu.bt-row-menu [class*="item-drag-handle"] {
     height: 27px !important;
 }
 
@@ -1136,7 +1139,8 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu.bt-row-menu::after {
     border: none !important;
     box-shadow: none !important;
 }
-body.ir-enabled.bt-toggles.bt-bullets .link-menu.bt-row-menu .item-drag-handle {
+body.ir-enabled.bt-toggles.bt-bullets .link-menu.bt-row-menu[class*="item-drag-handle"],
+body.ir-enabled.bt-toggles.bt-bullets .link-menu.bt-row-menu [class*="item-drag-handle"] {
     pointer-events: auto !important;
     position: relative !important;
     /* Shift the drag circle all the way to the LEFT of the chevron.
@@ -4433,7 +4437,7 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             const li = t.closest('.listitem');
             if (li) lastHoveredLi = li;
             if (!isEnabled || !isTogglesEnabled || !isBulletsEnabled) return;
-            const dh = t.closest('.item-drag-handle');
+            const dh = t.closest('[class*="item-drag-handle"]');
             if (!dh) {
                 // Mouse is somewhere other than the drag-handle — let
                 // CSS :hover drive the rectangle.
@@ -4463,7 +4467,7 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             // Still inside the drag-handle or the anchored listitem →
             // keep the class.
             if (to && to.closest) {
-                if (to.closest('.item-drag-handle')) return;
+                if (to.closest('[class*="item-drag-handle"]')) return;
                 if (to.closest('.listitem') === lastDragHoverLi) return;
             }
             clearDragHover();
