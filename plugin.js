@@ -4366,6 +4366,34 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                     const caretEl = li.querySelector(':scope > .bt-marker > .bt-caret');
                     if (caretEl) setCaretChevron(caretEl, shouldCollapse);
                     triggerNativeFold(li, shouldCollapse);
+                    // Direct-DOM fallback. Diagnostic confirmed
+                    // current Thymer build keeps the action buttons
+                    // permanently in the link-menu (display:none) but
+                    // its click handler is gated on a JS-cached row
+                    // reference that only updates on a REAL drag-icon
+                    // hover. Synthetic hover doesn't update that
+                    // cache, so triggerNativeFold's button click is
+                    // a no-op for any row the user hasn't directly
+                    // hovered the drag-icon of. After ~250ms (well
+                    // past triggerNativeFold's full retry chain), if
+                    // the row's listitem-folded class still doesn't
+                    // match shouldCollapse, we toggle it ourselves.
+                    // Trade-off: Thymer's editor model isn't aware,
+                    // so arrow-key navigation may walk through
+                    // directly-folded rows until the user touches
+                    // the drag-icon once to sync state. Acceptable
+                    // because the visible fold + caret reactivity
+                    // works immediately. scheduleOutlinePass() picks
+                    // up the class change either way.
+                    setTimeout(() => {
+                        if (this.isUnloaded) return;
+                        if (!li.isConnected) return;
+                        const isFolded = li.classList.contains('listitem-folded');
+                        if (isFolded !== shouldCollapse) {
+                            li.classList.toggle('listitem-folded', shouldCollapse);
+                            scheduleOutlinePass();
+                        }
+                    }, 250);
                     // Let Thymer apply listitem-folded, then re-sync our
                     // mirror class + caret + has-children stickiness.
                     scheduleOutlinePass();
