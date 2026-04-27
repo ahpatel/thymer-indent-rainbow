@@ -2656,8 +2656,39 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                 const prevV = btn.style.visibility;
                 btn.style.setProperty('display', 'flex', 'important');
                 btn.style.setProperty('visibility', 'hidden', 'important');
-                fdbg('tryClickAction:click', { guid: ourGuid, action: actionClass });
-                fullClick(btn);
+                // Reparent the action button INTO the target listitem
+                // for the duration of the synchronous click. Thymer's
+                // delegated click handler resolves the target row via
+                // e.target.closest('.listitem'); the action button
+                // normally lives inside the floating .link-menu which
+                // sits OUTSIDE any .listitem in the DOM, so
+                // closest('.listitem') returns null and Thymer's
+                // handler bails silently. Diagnostic trace confirmed
+                // this: the click reaches the button, but listitem-folded
+                // never flips and lineitem-btn-unfold never appears.
+                // Move the button into our target row, fire click
+                // (synchronous -- handler runs before we restore), then
+                // put the button back. The restore is unconditional
+                // (try/finally) so a throwing handler doesn't leave the
+                // popup permanently broken.
+                const origParent = btn.parentNode;
+                const origNext = btn.nextSibling;
+                fdbg('tryClickAction:click', {
+                    guid: ourGuid, action: actionClass,
+                    reparenting: !!origParent,
+                });
+                try {
+                    li.appendChild(btn);
+                    fullClick(btn);
+                } finally {
+                    if (origParent) {
+                        if (origNext && origNext.parentNode === origParent) {
+                            origParent.insertBefore(btn, origNext);
+                        } else {
+                            origParent.appendChild(btn);
+                        }
+                    }
+                }
                 btn.style.display = prevD;
                 btn.style.visibility = prevV;
                 // Verify the fold actually landed on the target row.
