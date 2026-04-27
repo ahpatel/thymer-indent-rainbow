@@ -2458,6 +2458,12 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                 }
             } catch (_) {}
         };
+        // Build marker so we can confirm at runtime which code revision
+        // is loaded (Thymer can cache plugin.js aggressively across
+        // reloads). Bumped on every diagnostic checkpoint commit.
+        try {
+            console.log('[ir-fold] plugin loaded', { build: 'caret-fold-r3' });
+        } catch (_) {}
         const triggerNativeFold = (li, shouldCollapse) => {
             if (!li || !li.classList) return;
             const lineDiv = li.querySelector(':scope > .line-div') || li;
