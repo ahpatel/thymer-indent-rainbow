@@ -3762,16 +3762,37 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
         // Thymer's hover creation is gated on isTrusted, this is a safe
         // no-op — we leave nothing visibly different (we leave() right
         // after enter()). Either way, no regression on real user hover.
-        const primeLinkMenu = () => {
-            if (this.isUnloaded) return;
-            // Already primed — bail.
-            if (document.querySelector('.link-menu')) return;
-            const li = outlineTarget.querySelector('.listitem');
-            if (!li) return;
-            const r = li.getBoundingClientRect();
-            if (r.width === 0 || r.height === 0) return;
-            const cx = r.right - 10;
-            const cy = r.top + r.height / 2;
+        // Dispatch a synthetic hover sequence on the drag-handle
+        // element (or, if it doesn't exist yet, on the first
+        // .listitem). User testing showed that real hover specifically
+        // OVER THE DRAG-ICON is what summons Thymer's action buttons
+        // (.link-menu-action-collapse / -expand) -- a real hover
+        // anywhere else in the row does nothing. The drag-icon and
+        // the .link-menu are the SAME element in current Thymer
+        // builds, so hovering it activates the menu's "show action
+        // buttons" state. We mimic that by dispatching pointer + mouse
+        // hover events on the drag-handle's bounding rect.
+        const synthHandleHover = () => {
+            if (this.isUnloaded) return false;
+            // Prefer an actual drag-handle if Thymer has already
+            // created one. Fall back to the first .listitem at the
+            // row's right edge as a coarser hover-summon.
+            let target = document.querySelector('[class*="item-drag-handle"]');
+            let cx, cy;
+            if (target) {
+                const r = target.getBoundingClientRect();
+                if (r.width === 0 || r.height === 0) return false;
+                cx = r.left + r.width / 2;
+                cy = r.top + r.height / 2;
+            } else {
+                const li = outlineTarget.querySelector('.listitem');
+                if (!li) return false;
+                const r = li.getBoundingClientRect();
+                if (r.width === 0 || r.height === 0) return false;
+                target = li;
+                cx = r.right - 10;
+                cy = r.top + r.height / 2;
+            }
             const opts = {
                 bubbles: true, cancelable: true, composed: true,
                 view: window, clientX: cx, clientY: cy,
@@ -3780,9 +3801,10 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                 { pointerId: 1, pointerType: 'mouse', isPrimary: true },
                 opts,
             );
-            const targets = [li, document.elementFromPoint(cx, cy)].filter(Boolean);
+            const hits = [target, document.elementFromPoint(cx, cy)]
+                .filter(Boolean);
             try {
-                for (const t of targets) {
+                for (const t of hits) {
                     t.dispatchEvent(new PointerEvent('pointerover', popts));
                     t.dispatchEvent(new PointerEvent('pointerenter', popts));
                     t.dispatchEvent(new MouseEvent('mouseover', opts));
@@ -3791,17 +3813,42 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                     t.dispatchEvent(new MouseEvent('mousemove', opts));
                 }
             } catch (_) {}
-            // Leave on the next tick so Thymer has time to react. We
-            // don't want the row visibly highlighted on session start.
+            return true;
+        };
+
+        // skipLeave=true skips the synthetic handle-leave that
+        // normally fires 16ms after the enter -- used by the runtime
+        // per-row-transition path so we don't un-summon the action
+        // buttons we just primed while the user is still hovering.
+        const primeLinkMenu = (skipLeave = false) => {
+            if (this.isUnloaded) return;
+            // If action buttons are already in DOM, no synthesis
+            // needed -- caret click will find them via tryClickAction.
+            const haveActions =
+                !!document.querySelector('.link-menu-action-collapse');
+            if (haveActions) return;
+            const ok = synthHandleHover();
+            if (!ok || skipLeave) return;
+            // Init-time path: leave on the next tick so we don't
+            // visibly highlight a row at session start.
             setTimeout(() => {
                 if (this.isUnloaded) return;
+                const handle = document.querySelector('[class*="item-drag-handle"]');
+                if (!handle) return;
+                const r = handle.getBoundingClientRect();
+                const opts = {
+                    bubbles: true, cancelable: true, composed: true,
+                    view: window, clientX: r.left, clientY: r.top,
+                };
+                const popts = Object.assign(
+                    { pointerId: 1, pointerType: 'mouse', isPrimary: true },
+                    opts,
+                );
                 try {
-                    for (const t of targets.slice().reverse()) {
-                        t.dispatchEvent(new MouseEvent('mouseleave', opts));
-                        t.dispatchEvent(new MouseEvent('mouseout', opts));
-                        t.dispatchEvent(new PointerEvent('pointerleave', popts));
-                        t.dispatchEvent(new PointerEvent('pointerout', popts));
-                    }
+                    handle.dispatchEvent(new MouseEvent('mouseleave', opts));
+                    handle.dispatchEvent(new MouseEvent('mouseout', opts));
+                    handle.dispatchEvent(new PointerEvent('pointerleave', popts));
+                    handle.dispatchEvent(new PointerEvent('pointerout', popts));
                 } catch (_) {}
             }, 16);
         };
@@ -3818,41 +3865,40 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             clearTimeout(primeTimer1);
             clearTimeout(primeTimer2);
         });
-        // Latch onto the FIRST real user mouse interaction in the
-        // editor and ride it to summon the link-menu. Real events
-        // are isTrusted=true, so even if Thymer's hover popup is
-        // gated on trusted events, this hooks into the user's own
-        // movement to prime the menu before they ever click the
-        // bt-caret -- avoiding the "click drag-icon first" gotcha.
-        let primedByRealHover = false;
-        const onFirstRealHover = (e) => {
-            if (primedByRealHover) return;
+        // Re-prime the link-menu on every row transition. Riding the
+        // user's REAL mouse motion (isTrusted=true) keeps Thymer's
+        // hover state machine ticking; our synthetic handle-hover
+        // tucked into that real-event window primes the
+        // action-buttons sub-popup so a subsequent bt-caret click
+        // can find the .link-menu-action-collapse button via the
+        // doc-wide search in tryClickAction.
+        //
+        // We re-fire on row TRANSITIONS only (not every mousemove)
+        // to keep this cheap. Per-row primes also handle the case
+        // where Thymer destroys / re-creates the menu when the user
+        // moves between distant rows.
+        let lastPrimedRow = null;
+        const onUserHover = (e) => {
             if (!e.isTrusted) return;
-            // Skip if menu is already there (other code primed it).
-            if (document.querySelector('.link-menu')) {
-                primedByRealHover = true;
-                outlineTarget.removeEventListener('pointermove', onFirstRealHover, true);
-                outlineTarget.removeEventListener('mouseover', onFirstRealHover, true);
-                return;
-            }
-            // Run our synthetic hover NOW. Thymer's state machine
-            // already has fresh real-event input pending, so the
-            // synthetic enter we dispatch lands in a hover-receptive
-            // moment.
-            primeLinkMenu();
-            // If the link-menu appeared, latch off so we don't
-            // re-fire on every mousemove.
-            if (document.querySelector('.link-menu')) {
-                primedByRealHover = true;
-                outlineTarget.removeEventListener('pointermove', onFirstRealHover, true);
-                outlineTarget.removeEventListener('mouseover', onFirstRealHover, true);
-            }
+            const li = e.target && e.target.closest
+                && e.target.closest('.listitem');
+            if (!li || li === lastPrimedRow) return;
+            lastPrimedRow = li;
+            // Defer one frame so Thymer has time to reposition the
+            // shared link-menu over the newly-hovered row before we
+            // dispatch on the (repositioned) drag-handle. skipLeave
+            // since the user is actively hovering -- a synthetic
+            // leave would un-summon the action buttons.
+            requestAnimationFrame(() => {
+                if (this.isUnloaded) return;
+                primeLinkMenu(true);
+            });
         };
-        outlineTarget.addEventListener('pointermove', onFirstRealHover, true);
-        outlineTarget.addEventListener('mouseover', onFirstRealHover, true);
+        outlineTarget.addEventListener('pointermove', onUserHover, true);
+        outlineTarget.addEventListener('mouseover', onUserHover, true);
         this.cleanupMethods.push(() => {
-            outlineTarget.removeEventListener('pointermove', onFirstRealHover, true);
-            outlineTarget.removeEventListener('mouseover', onFirstRealHover, true);
+            outlineTarget.removeEventListener('pointermove', onUserHover, true);
+            outlineTarget.removeEventListener('mouseover', onUserHover, true);
         });
 
         // ---------- GUID resolution + zoom ----------
