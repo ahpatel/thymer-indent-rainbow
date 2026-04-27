@@ -3512,12 +3512,18 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                 dbg('bail: neither bullets nor toggles enabled');
                 return;
             }
-            // Descendant query so newer Thymer builds that wrap the
-            // drag-handle in an inner container still match. Earlier
-            // ':scope > .item-drag-handle' missed those builds, the
-            // function bailed early, and the drag-circle stayed at
-            // Thymer's native row-center position on wrapped rows.
-            const handle = linkMenu.querySelector('.item-drag-handle');
+            // The drag-handle can be EITHER a descendant OR the
+            // link-menu element itself (Thymer collapses both classes
+            // onto one node in current builds: `class="link-menu
+            // bt-row-menu item-drag-handle ..."`). querySelector only
+            // searches descendants, so check `matches()` first; the
+            // descendant query is the fallback for builds that wrap
+            // the handle. Identified via diagnostic logging which
+            // showed every link-menu's outerHTML carrying the
+            // item-drag-handle class on the root element itself.
+            const handle = linkMenu.matches('.item-drag-handle')
+                ? linkMenu
+                : linkMenu.querySelector('.item-drag-handle');
             if (!handle) {
                 dbg('bail: no .item-drag-handle in linkMenu',
                     { linkMenuHTML: linkMenu.outerHTML.slice(0, 300) });
@@ -3535,9 +3541,9 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                 dbg('bail: row lookup failed', { guid });
                 return;
             }
-            const menuRect = linkMenu.getBoundingClientRect();
-            if (menuRect.height === 0) {
-                dbg('bail: menuRect.height === 0', { menuRect });
+            const handleRect = handle.getBoundingClientRect();
+            if (handleRect.height === 0) {
+                dbg('bail: handleRect.height === 0', { handleRect });
                 return;
             }
             // Prefer the Range-based first-line measurement; fall back
@@ -3558,26 +3564,37 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                 firstLineMidY = rowRect.top + rowRect.height / 2;
                 firstLineSource = 'rowRect-fallback';
             }
-            const offsetTop = firstLineMidY - menuRect.top - DRAG_HANDLE_RADIUS;
+            // Thymer's current build collapses .link-menu and
+            // .item-drag-handle onto the SAME element. That means
+            // `top: Xpx` set on the handle is positioned relative to
+            // its offsetParent (the editor / page container), not
+            // relative to the link-menu (which used to be the handle's
+            // containing block in older builds where they were
+            // separate). Compute desired top in offsetParent coords:
+            // handle's TOP edge should sit at firstLineMidY -
+            // DRAG_HANDLE_RADIUS in viewport space, so subtract the
+            // offsetParent's viewport top to convert.
+            const parent = handle.offsetParent || document.documentElement;
+            const parentRect = parent.getBoundingClientRect();
+            const desiredTopPx = firstLineMidY
+                - DRAG_HANDLE_RADIUS
+                - parentRect.top;
             // Avoid layout thrash: skip re-writing when the value hasn't
             // changed meaningfully (sub-pixel noise on rapid repositions).
             const prev = parseFloat(handle.style.top);
-            if (Number.isFinite(prev) && Math.abs(prev - offsetTop) < 0.5) {
-                dbg('skip: offsetTop unchanged', { prev, offsetTop });
+            if (Number.isFinite(prev) && Math.abs(prev - desiredTopPx) < 0.5) {
+                dbg('skip: desiredTopPx unchanged', { prev, desiredTopPx });
                 return;
             }
-            // setProperty with 'important' so we beat the CSS fallback
-            // rule's `top: calc(1em - 14.5px) !important`. Without the
-            // 'important' on the inline write, plain handle.style.top
-            // loses to the author rule and the JS measurement is silently
-            // discarded -- the symptom from earlier rounds where the
-            // drag-circle stayed at the CSS-default position on wrapped
-            // rows even though alignDragHandleToFirstLine ran cleanly.
-            handle.style.setProperty('top', `${offsetTop}px`, 'important');
+            // setProperty with 'important' so we beat both the CSS
+            // fallback rule's `top: calc(1em - 14.5px) !important` and
+            // any inline `!important` Thymer may set on its anchor.
+            handle.style.setProperty('top', `${desiredTopPx}px`, 'important');
             handle.style.setProperty('bottom', 'auto', 'important');
             dbg('wrote handle.style.top', {
-                guid, offsetTop, firstLineSource,
-                menuTop: menuRect.top,
+                guid, desiredTopPx, firstLineSource,
+                handleTop: handleRect.top,
+                parentTop: parentRect.top,
                 firstLineMidY,
                 rowRectTop: row.getBoundingClientRect().top,
                 rowRectHeight: row.getBoundingClientRect().height,
@@ -3587,9 +3604,12 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             // Verify on next frame whether our write survived.
             requestAnimationFrame(() => {
                 const after = getComputedStyle(handle).top;
-                dbg('post-rAF computedStyle.top', {
-                    after,
+                const newRect = handle.getBoundingClientRect();
+                dbg('post-rAF', {
+                    computedStyleTop: after,
                     handleStyleTop: handle.style.top,
+                    handleRectTop: newRect.top,
+                    expectedRectTop: firstLineMidY - DRAG_HANDLE_RADIUS,
                 });
             });
         };
@@ -3654,9 +3674,11 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             if (linkMenu.classList) linkMenu.classList.remove('bt-row-menu');
             // Also strip our inline overrides so a reused .link-menu
             // doesn't carry stale positioning into the next hover.
-            const handle = linkMenu.querySelector
-                ? linkMenu.querySelector('.item-drag-handle')
-                : null;
+            const handle = linkMenu.matches && linkMenu.matches('.item-drag-handle')
+                ? linkMenu
+                : (linkMenu.querySelector
+                    ? linkMenu.querySelector('.item-drag-handle')
+                    : null);
             if (handle) {
                 // removeProperty so the !important inline writes from
                 // alignDragHandleToFirstLine don't linger when the menu
