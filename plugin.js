@@ -3411,7 +3411,11 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
         // between visible icons rather than on the circle.
         const reorderLinkMenu = (linkMenu) => {
             if (!linkMenu || !linkMenu.querySelector) return;
-            const handle = linkMenu.querySelector(':scope > .item-drag-handle');
+            // Substring match: current builds use
+            // `item-drag-handle-style`, older builds used
+            // `item-drag-handle`. Either matches `[class*=...]`.
+            const handle = linkMenu.querySelector(
+                ':scope > [class*="item-drag-handle"]');
             if (!handle) return;
             if (linkMenu.firstElementChild === handle) return;
             linkMenu.insertBefore(handle, linkMenu.firstElementChild);
@@ -3440,9 +3444,14 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             // both-on hover frame next to our caret/bullet (image 1).
             // Any of the four child types is unique to row-menus; inline
             // page-link popups (which reuse .link-menu) have none of them.
-            const isRow = !!linkMenu.querySelector(
-                '.item-drag-handle, .link-menu-action-collapse, '
-                + '.link-menu-action-expand, .link-menu-action-zoom');
+            // Substring match on item-drag-handle covers both old
+            // (`item-drag-handle`) and current (`item-drag-handle-style`)
+            // class names, plus check whether the link-menu IS the
+            // handle (current builds collapse them onto one element).
+            const isRow = linkMenu.matches('[class*="item-drag-handle"]')
+                || !!linkMenu.querySelector(
+                    '[class*="item-drag-handle"], .link-menu-action-collapse, '
+                    + '.link-menu-action-expand, .link-menu-action-zoom');
             linkMenu.classList.toggle('bt-row-menu', isRow);
         };
 
@@ -3513,17 +3522,19 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                 return;
             }
             // The drag-handle can be EITHER a descendant OR the
-            // link-menu element itself (Thymer collapses both classes
-            // onto one node in current builds: `class="link-menu
-            // bt-row-menu item-drag-handle ..."`). querySelector only
-            // searches descendants, so check `matches()` first; the
-            // descendant query is the fallback for builds that wrap
-            // the handle. Identified via diagnostic logging which
-            // showed every link-menu's outerHTML carrying the
-            // item-drag-handle class on the root element itself.
-            const handle = linkMenu.matches('.item-drag-handle')
+            // link-menu element itself, AND the class name varies:
+            // current builds use `item-drag-handle-style` /
+            // `item-drag-handle-editor-style`; older builds used
+            // `item-drag-handle`. Use a substring match on the class
+            // attribute so all variants resolve. Diagnostic logs
+            // showed link-menu's class list as `link-menu bt-row-menu
+            // item-drag-handle-style item-drag-handle-editor-style
+            // ...`, which the literal `.item-drag-handle` selector
+            // does not match (CSS class names don't substring-match).
+            const HANDLE_SELECTOR = '[class*="item-drag-handle"]';
+            const handle = linkMenu.matches(HANDLE_SELECTOR)
                 ? linkMenu
-                : linkMenu.querySelector('.item-drag-handle');
+                : linkMenu.querySelector(HANDLE_SELECTOR);
             if (!handle) {
                 dbg('bail: no .item-drag-handle in linkMenu',
                     { linkMenuHTML: linkMenu.outerHTML.slice(0, 300) });
@@ -3674,10 +3685,11 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             if (linkMenu.classList) linkMenu.classList.remove('bt-row-menu');
             // Also strip our inline overrides so a reused .link-menu
             // doesn't carry stale positioning into the next hover.
-            const handle = linkMenu.matches && linkMenu.matches('.item-drag-handle')
+            const HANDLE_SEL = '[class*="item-drag-handle"]';
+            const handle = linkMenu.matches && linkMenu.matches(HANDLE_SEL)
                 ? linkMenu
                 : (linkMenu.querySelector
-                    ? linkMenu.querySelector('.item-drag-handle')
+                    ? linkMenu.querySelector(HANDLE_SEL)
                     : null);
             if (handle) {
                 // removeProperty so the !important inline writes from
