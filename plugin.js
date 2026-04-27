@@ -59,19 +59,12 @@ class Plugin extends AppPlugin {
         //   .line-number-div       native olist number column.
         //
         //   .link-menu             hover popup anchored to a row;
-        //                          in current Thymer builds the same
-        //                          element ALSO carries the drag-
-        //                          handle classes (collapsed onto one
-        //                          node), with native zoom / collapse
-        //                          buttons as descendants.
-        //   .item-drag-handle-style (a.k.a. legacy .item-drag-handle)
-        //                          the floating circle we restyle as
-        //                          the drag/options affordance. We
-        //                          match via [class*="item-drag-handle"]
-        //                          so both the legacy class and the
-        //                          renamed `-style` variant qualify.
-        //   .handle-fold-icon      Thymer's inner SVG inside the
-        //                          drag-handle element (we hide it
+        //                          contains .item-drag-handle and
+        //                          native zoom / collapse buttons.
+        //   .item-drag-handle      the floating circle we restyle
+        //                          as the drag/options affordance.
+        //   .handle-fold-icon      Thymer's inner SVG inside
+        //                          .item-drag-handle (we hide it
         //                          and replace with a dots glyph).
         //   .link-menu-action-collapse, .link-menu-action-expand,
         //   .link-menu-action-zoom
@@ -964,7 +957,7 @@ body.ir-enabled .listitem.bt-zoom-start-line > .line-div {
 /* ---------- Hover-menu adjustments when our caret is active ----------
      1. Hide the native collapse/expand chevrons in .link-menu (our
         .bt-caret is the single collapse affordance).
-     2. Replace the fold-icon SVG inside the drag-handle with a dots
+     2. Replace the fold-icon SVG inside .item-drag-handle with a dots
         glyph, so the drag/options affordance is visually obvious and
         the click zone lands directly on what the user sees. (Force-
         showing .link-menu-action-options doesn't work because Thymer's
@@ -1011,15 +1004,15 @@ body.ir-enabled.bt-bullets .link-menu.bt-row-menu .link-menu-action-zoom {
    (Thymer keeps its position: absolute), so the hover menu continues
    to follow the cursor. display: none on the SVG removes it from the
    flex flow so the ::after is the sole centered child. */
-body.ir-enabled.bt-toggles [class*="item-drag-handle"],
-body.ir-enabled.bt-bullets [class*="item-drag-handle"] {
+body.ir-enabled.bt-toggles .item-drag-handle,
+body.ir-enabled.bt-bullets .item-drag-handle {
     display: flex !important;
     align-items: center;
     justify-content: center;
 }
 
 /* Pin the drag-handle popup to the FIRST line of wrapped rows (mirrors
-   the .bt-marker alignment fix). Thymer positions the drag-handle
+   the .bt-marker alignment fix). Thymer positions .item-drag-handle
    absolutely and centers it vertically on the listitem's full box, so
    on wrapped rows the circle floats between lines. Overriding top to
    (1lh - 30px) / 2 lands the 27px circle's vertical center on the
@@ -1034,8 +1027,8 @@ body.ir-enabled.bt-bullets [class*="item-drag-handle"] {
    the full row box, not its top) — pure CSS can't recover from that
    since we don't know the delta statically. JS inline top naturally
    wins over this calc. */
-body.ir-enabled.bt-toggles [class*="item-drag-handle"],
-body.ir-enabled.bt-bullets [class*="item-drag-handle"] {
+body.ir-enabled.bt-toggles .item-drag-handle,
+body.ir-enabled.bt-bullets .item-drag-handle {
     /* Pin the circle to the row's FIRST text baseline, matching where
        .bt-marker's caret + bullet land. We measure from the top of
        the row: 'top: calc(.5em - 13.5px)' puts the circle's vertical
@@ -1054,16 +1047,16 @@ body.ir-enabled.bt-bullets [class*="item-drag-handle"] {
        stacking context) doesn't cover the drag circle. */
     z-index: 12 !important;
 }
-body.ir-enabled.bt-toggles [class*="item-drag-handle"] .handle-fold-icon,
-body.ir-enabled.bt-bullets [class*="item-drag-handle"] .handle-fold-icon {
+body.ir-enabled.bt-toggles .item-drag-handle .handle-fold-icon,
+body.ir-enabled.bt-bullets .item-drag-handle .handle-fold-icon {
     display: none;
 }
 /* No inner glyph — match native drag circle (dashed ring, empty
    interior). The ::after remains declared so Thymer's own fold-icon
    SVG stays hidden via display:none above without anything else
    jumping in to fill the circle. */
-body.ir-enabled.bt-toggles [class*="item-drag-handle"]::after,
-body.ir-enabled.bt-bullets [class*="item-drag-handle"]::after {
+body.ir-enabled.bt-toggles .item-drag-handle::after,
+body.ir-enabled.bt-bullets .item-drag-handle::after {
     content: none;
 }
 
@@ -1079,8 +1072,7 @@ body.ir-enabled.bt-bullets [class*="item-drag-handle"]::after {
 body.ir-enabled .link-menu.bt-row-menu .link-menu-action-zoom,
 body.ir-enabled .link-menu.bt-row-menu .link-menu-action-collapse,
 body.ir-enabled .link-menu.bt-row-menu .link-menu-action-expand,
-body.ir-enabled .link-menu.bt-row-menu[class*="item-drag-handle"],
-body.ir-enabled .link-menu.bt-row-menu [class*="item-drag-handle"] {
+body.ir-enabled .link-menu.bt-row-menu .item-drag-handle {
     flex: 0 0 27px !important;
     width: 27px !important;
     min-width: 27px !important;
@@ -1099,10 +1091,8 @@ body.ir-enabled .link-menu.bt-row-menu [class*="item-drag-handle"] {
    (see link-menu observer below) — CSS 'order' appeared to desync
    Thymer's hit-zone from the visible ring in some states, so we do
    a real reparent instead. */
-body.ir-enabled.bt-toggles .link-menu.bt-row-menu[class*="item-drag-handle"],
-body.ir-enabled.bt-bullets .link-menu.bt-row-menu[class*="item-drag-handle"],
-body.ir-enabled.bt-toggles .link-menu.bt-row-menu [class*="item-drag-handle"],
-body.ir-enabled.bt-bullets .link-menu.bt-row-menu [class*="item-drag-handle"] {
+body.ir-enabled.bt-toggles .link-menu.bt-row-menu .item-drag-handle,
+body.ir-enabled.bt-bullets .link-menu.bt-row-menu .item-drag-handle {
     height: 27px !important;
 }
 
@@ -1146,8 +1136,7 @@ body.ir-enabled.bt-toggles.bt-bullets .link-menu.bt-row-menu::after {
     border: none !important;
     box-shadow: none !important;
 }
-body.ir-enabled.bt-toggles.bt-bullets .link-menu.bt-row-menu[class*="item-drag-handle"],
-body.ir-enabled.bt-toggles.bt-bullets .link-menu.bt-row-menu [class*="item-drag-handle"] {
+body.ir-enabled.bt-toggles.bt-bullets .link-menu.bt-row-menu .item-drag-handle {
     pointer-events: auto !important;
     position: relative !important;
     /* Shift the drag circle all the way to the LEFT of the chevron.
@@ -2571,7 +2560,25 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                     const b = m.querySelector(actionClass);
                     if (b) { menu = m; btn = b; break; }
                 }
-                if (!menu) return false;
+                // Document-wide fallback. In current Thymer builds
+                // the .link-menu element is collapsed onto the
+                // drag-handle and may not contain the action buttons
+                // until the user clicks the drag-handle to open a
+                // sub-popup. The action button often still exists
+                // somewhere in the DOM (e.g. detached popup, hidden
+                // panel) -- search globally and walk up to a
+                // reasonable container so the link-menu-visible /
+                // data-guid override below has somewhere to land.
+                if (!btn) {
+                    btn = document.querySelector(actionClass);
+                    if (btn) {
+                        menu = btn.closest('.link-menu')
+                            || btn.closest('[class*="popup"]')
+                            || btn.closest('[class*="menu"]')
+                            || btn.parentElement;
+                    }
+                }
+                if (!menu || !btn) return false;
                 // Thymer's click handler appears to gate on four pieces
                 // of anchor state:
                 //   - `.link-menu-visible` class on the menu
@@ -3415,18 +3422,16 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
         };
 
         // ----- link-menu drag-handle DOM reorder -----
-        // When Thymer injects a .link-menu hover popup, move the drag-handle
-        // child to be the FIRST child so the drag circle renders on the left.
-        // We use a real reparent (not CSS `order`) because in some states
-        // Thymer's hit-zone appears to key off DOM order, producing a hotzone
-        // that sits between visible icons rather than on the circle.
-        // Current Thymer builds collapse the drag-handle onto the link-menu
-        // element itself; in that case there is no separate child to reorder
-        // and this function is a safe no-op. The attribute selector matches
-        // both the legacy `.item-drag-handle` and the renamed
-        // `.item-drag-handle-style` (and any future `*item-drag-handle*`).
+        // When Thymer injects a .link-menu hover popup, move .item-drag-handle
+        // to be the FIRST child so the drag circle renders on the left. We use
+        // a real reparent (not CSS `order`) because in some states Thymer's
+        // hit-zone appears to key off DOM order, producing a hotzone that sits
+        // between visible icons rather than on the circle.
         const reorderLinkMenu = (linkMenu) => {
             if (!linkMenu || !linkMenu.querySelector) return;
+            // Substring match: current builds use
+            // `item-drag-handle-style`, older builds used
+            // `item-drag-handle`. Either matches `[class*=...]`.
             const handle = linkMenu.querySelector(
                 ':scope > [class*="item-drag-handle"]');
             if (!handle) return;
@@ -3457,16 +3462,14 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             // both-on hover frame next to our caret/bullet (image 1).
             // Any of the four child types is unique to row-menus; inline
             // page-link popups (which reuse .link-menu) have none of them.
-            // [class*="item-drag-handle"] matches both the legacy class
-            // and Thymer's renamed `.item-drag-handle-style` variant.
-            // Also accept the case where the link-menu element ITSELF
-            // carries the drag-handle class (current builds collapse the
-            // two onto one node).
-            const selfIsHandle = linkMenu.matches
-                && linkMenu.matches('[class*="item-drag-handle"]');
-            const isRow = selfIsHandle || !!linkMenu.querySelector(
-                '[class*="item-drag-handle"], .link-menu-action-collapse, '
-                + '.link-menu-action-expand, .link-menu-action-zoom');
+            // Substring match on item-drag-handle covers both old
+            // (`item-drag-handle`) and current (`item-drag-handle-style`)
+            // class names, plus check whether the link-menu IS the
+            // handle (current builds collapse them onto one element).
+            const isRow = linkMenu.matches('[class*="item-drag-handle"]')
+                || !!linkMenu.querySelector(
+                    '[class*="item-drag-handle"], .link-menu-action-collapse, '
+                    + '.link-menu-action-expand, .link-menu-action-zoom');
             linkMenu.classList.toggle('bt-row-menu', isRow);
         };
 
@@ -3537,22 +3540,21 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                 return;
             }
             // The drag-handle can be EITHER a descendant OR the
-            // link-menu element itself (current Thymer builds collapse
-            // both classes onto one node, e.g. `class="link-menu
-            // bt-row-menu item-drag-handle-style ..."`). querySelector
-            // only searches descendants, so check `matches()` first;
-            // the descendant query is the fallback for builds that
-            // wrap the handle. The attribute selector matches both the
-            // legacy `.item-drag-handle` and the renamed
-            // `.item-drag-handle-style` (and any future variant) --
-            // necessary because diagnostic logs revealed Thymer renamed
-            // the class and the previous `.item-drag-handle` selector
-            // silently matched nothing, leaving the function bailing.
-            const handle = linkMenu.matches('[class*="item-drag-handle"]')
+            // link-menu element itself, AND the class name varies:
+            // current builds use `item-drag-handle-style` /
+            // `item-drag-handle-editor-style`; older builds used
+            // `item-drag-handle`. Use a substring match on the class
+            // attribute so all variants resolve. Diagnostic logs
+            // showed link-menu's class list as `link-menu bt-row-menu
+            // item-drag-handle-style item-drag-handle-editor-style
+            // ...`, which the literal `.item-drag-handle` selector
+            // does not match (CSS class names don't substring-match).
+            const HANDLE_SELECTOR = '[class*="item-drag-handle"]';
+            const handle = linkMenu.matches(HANDLE_SELECTOR)
                 ? linkMenu
-                : linkMenu.querySelector('[class*="item-drag-handle"]');
+                : linkMenu.querySelector(HANDLE_SELECTOR);
             if (!handle) {
-                dbg('bail: no drag-handle element found',
+                dbg('bail: no .item-drag-handle in linkMenu',
                     { linkMenuHTML: linkMenu.outerHTML.slice(0, 300) });
                 return;
             }
@@ -3591,8 +3593,8 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                 firstLineMidY = rowRect.top + rowRect.height / 2;
                 firstLineSource = 'rowRect-fallback';
             }
-            // Thymer's current build collapses .link-menu and the
-            // drag-handle onto the SAME element. That means
+            // Thymer's current build collapses .link-menu and
+            // .item-drag-handle onto the SAME element. That means
             // `top: Xpx` set on the handle is positioned relative to
             // its offsetParent (the editor / page container), not
             // relative to the link-menu (which used to be the handle's
@@ -3701,10 +3703,11 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             if (linkMenu.classList) linkMenu.classList.remove('bt-row-menu');
             // Also strip our inline overrides so a reused .link-menu
             // doesn't carry stale positioning into the next hover.
-            const handle = linkMenu.matches && linkMenu.matches('[class*="item-drag-handle"]')
+            const HANDLE_SEL = '[class*="item-drag-handle"]';
+            const handle = linkMenu.matches && linkMenu.matches(HANDLE_SEL)
                 ? linkMenu
                 : (linkMenu.querySelector
-                    ? linkMenu.querySelector('[class*="item-drag-handle"]')
+                    ? linkMenu.querySelector(HANDLE_SEL)
                     : null);
             if (handle) {
                 // removeProperty so the !important inline writes from
@@ -3759,16 +3762,37 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
         // Thymer's hover creation is gated on isTrusted, this is a safe
         // no-op — we leave nothing visibly different (we leave() right
         // after enter()). Either way, no regression on real user hover.
-        const primeLinkMenu = () => {
-            if (this.isUnloaded) return;
-            // Already primed — bail.
-            if (document.querySelector('.link-menu')) return;
-            const li = outlineTarget.querySelector('.listitem');
-            if (!li) return;
-            const r = li.getBoundingClientRect();
-            if (r.width === 0 || r.height === 0) return;
-            const cx = r.right - 10;
-            const cy = r.top + r.height / 2;
+        // Dispatch a synthetic hover sequence on the drag-handle
+        // element (or, if it doesn't exist yet, on the first
+        // .listitem). User testing showed that real hover specifically
+        // OVER THE DRAG-ICON is what summons Thymer's action buttons
+        // (.link-menu-action-collapse / -expand) -- a real hover
+        // anywhere else in the row does nothing. The drag-icon and
+        // the .link-menu are the SAME element in current Thymer
+        // builds, so hovering it activates the menu's "show action
+        // buttons" state. We mimic that by dispatching pointer + mouse
+        // hover events on the drag-handle's bounding rect.
+        const synthHandleHover = () => {
+            if (this.isUnloaded) return false;
+            // Prefer an actual drag-handle if Thymer has already
+            // created one. Fall back to the first .listitem at the
+            // row's right edge as a coarser hover-summon.
+            let target = document.querySelector('[class*="item-drag-handle"]');
+            let cx, cy;
+            if (target) {
+                const r = target.getBoundingClientRect();
+                if (r.width === 0 || r.height === 0) return false;
+                cx = r.left + r.width / 2;
+                cy = r.top + r.height / 2;
+            } else {
+                const li = outlineTarget.querySelector('.listitem');
+                if (!li) return false;
+                const r = li.getBoundingClientRect();
+                if (r.width === 0 || r.height === 0) return false;
+                target = li;
+                cx = r.right - 10;
+                cy = r.top + r.height / 2;
+            }
             const opts = {
                 bubbles: true, cancelable: true, composed: true,
                 view: window, clientX: cx, clientY: cy,
@@ -3777,9 +3801,10 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                 { pointerId: 1, pointerType: 'mouse', isPrimary: true },
                 opts,
             );
-            const targets = [li, document.elementFromPoint(cx, cy)].filter(Boolean);
+            const hits = [target, document.elementFromPoint(cx, cy)]
+                .filter(Boolean);
             try {
-                for (const t of targets) {
+                for (const t of hits) {
                     t.dispatchEvent(new PointerEvent('pointerover', popts));
                     t.dispatchEvent(new PointerEvent('pointerenter', popts));
                     t.dispatchEvent(new MouseEvent('mouseover', opts));
@@ -3788,25 +3813,93 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                     t.dispatchEvent(new MouseEvent('mousemove', opts));
                 }
             } catch (_) {}
-            // Leave on the next tick so Thymer has time to react. We
-            // don't want the row visibly highlighted on session start.
+            return true;
+        };
+
+        // skipLeave=true skips the synthetic handle-leave that
+        // normally fires 16ms after the enter -- used by the runtime
+        // per-row-transition path so we don't un-summon the action
+        // buttons we just primed while the user is still hovering.
+        const primeLinkMenu = (skipLeave = false) => {
+            if (this.isUnloaded) return;
+            // If action buttons are already in DOM, no synthesis
+            // needed -- caret click will find them via tryClickAction.
+            const haveActions =
+                !!document.querySelector('.link-menu-action-collapse');
+            if (haveActions) return;
+            const ok = synthHandleHover();
+            if (!ok || skipLeave) return;
+            // Init-time path: leave on the next tick so we don't
+            // visibly highlight a row at session start.
             setTimeout(() => {
                 if (this.isUnloaded) return;
+                const handle = document.querySelector('[class*="item-drag-handle"]');
+                if (!handle) return;
+                const r = handle.getBoundingClientRect();
+                const opts = {
+                    bubbles: true, cancelable: true, composed: true,
+                    view: window, clientX: r.left, clientY: r.top,
+                };
+                const popts = Object.assign(
+                    { pointerId: 1, pointerType: 'mouse', isPrimary: true },
+                    opts,
+                );
                 try {
-                    for (const t of targets.slice().reverse()) {
-                        t.dispatchEvent(new MouseEvent('mouseleave', opts));
-                        t.dispatchEvent(new MouseEvent('mouseout', opts));
-                        t.dispatchEvent(new PointerEvent('pointerleave', popts));
-                        t.dispatchEvent(new PointerEvent('pointerout', popts));
-                    }
+                    handle.dispatchEvent(new MouseEvent('mouseleave', opts));
+                    handle.dispatchEvent(new MouseEvent('mouseout', opts));
+                    handle.dispatchEvent(new PointerEvent('pointerleave', popts));
+                    handle.dispatchEvent(new PointerEvent('pointerout', popts));
                 } catch (_) {}
             }, 16);
         };
-        // Run once shortly after the outline settles. The 1500ms delay
-        // matches the existing post-load outline init pass so we don't
-        // race the first row paint.
-        const primeTimer = setTimeout(primeLinkMenu, 1500);
-        this.cleanupMethods.push(() => clearTimeout(primeTimer));
+        // Run shortly after the outline settles, and again as a
+        // safety retry. Some Thymer builds gate hover-popup creation
+        // on isTrusted -- in those builds primeLinkMenu is a no-op
+        // and the user must perform a real hover before bt-caret
+        // clicks can find the action button. The retry catches the
+        // case where the first attempt raced the editor's first
+        // paint or its row-tree population.
+        const primeTimer1 = setTimeout(primeLinkMenu, 1500);
+        const primeTimer2 = setTimeout(primeLinkMenu, 4000);
+        this.cleanupMethods.push(() => {
+            clearTimeout(primeTimer1);
+            clearTimeout(primeTimer2);
+        });
+        // Re-prime the link-menu on every row transition. Riding the
+        // user's REAL mouse motion (isTrusted=true) keeps Thymer's
+        // hover state machine ticking; our synthetic handle-hover
+        // tucked into that real-event window primes the
+        // action-buttons sub-popup so a subsequent bt-caret click
+        // can find the .link-menu-action-collapse button via the
+        // doc-wide search in tryClickAction.
+        //
+        // We re-fire on row TRANSITIONS only (not every mousemove)
+        // to keep this cheap. Per-row primes also handle the case
+        // where Thymer destroys / re-creates the menu when the user
+        // moves between distant rows.
+        let lastPrimedRow = null;
+        const onUserHover = (e) => {
+            if (!e.isTrusted) return;
+            const li = e.target && e.target.closest
+                && e.target.closest('.listitem');
+            if (!li || li === lastPrimedRow) return;
+            lastPrimedRow = li;
+            // Defer one frame so Thymer has time to reposition the
+            // shared link-menu over the newly-hovered row before we
+            // dispatch on the (repositioned) drag-handle. skipLeave
+            // since the user is actively hovering -- a synthetic
+            // leave would un-summon the action buttons.
+            requestAnimationFrame(() => {
+                if (this.isUnloaded) return;
+                primeLinkMenu(true);
+            });
+        };
+        outlineTarget.addEventListener('pointermove', onUserHover, true);
+        outlineTarget.addEventListener('mouseover', onUserHover, true);
+        this.cleanupMethods.push(() => {
+            outlineTarget.removeEventListener('pointermove', onUserHover, true);
+            outlineTarget.removeEventListener('mouseover', onUserHover, true);
+        });
 
         // ---------- GUID resolution + zoom ----------
         // Resolve the GUID of a .listitem. Try data-guid attrs first, then
@@ -4273,6 +4366,34 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                     const caretEl = li.querySelector(':scope > .bt-marker > .bt-caret');
                     if (caretEl) setCaretChevron(caretEl, shouldCollapse);
                     triggerNativeFold(li, shouldCollapse);
+                    // Direct-DOM fallback. Diagnostic confirmed
+                    // current Thymer build keeps the action buttons
+                    // permanently in the link-menu (display:none) but
+                    // its click handler is gated on a JS-cached row
+                    // reference that only updates on a REAL drag-icon
+                    // hover. Synthetic hover doesn't update that
+                    // cache, so triggerNativeFold's button click is
+                    // a no-op for any row the user hasn't directly
+                    // hovered the drag-icon of. After ~250ms (well
+                    // past triggerNativeFold's full retry chain), if
+                    // the row's listitem-folded class still doesn't
+                    // match shouldCollapse, we toggle it ourselves.
+                    // Trade-off: Thymer's editor model isn't aware,
+                    // so arrow-key navigation may walk through
+                    // directly-folded rows until the user touches
+                    // the drag-icon once to sync state. Acceptable
+                    // because the visible fold + caret reactivity
+                    // works immediately. scheduleOutlinePass() picks
+                    // up the class change either way.
+                    setTimeout(() => {
+                        if (this.isUnloaded) return;
+                        if (!li.isConnected) return;
+                        const isFolded = li.classList.contains('listitem-folded');
+                        if (isFolded !== shouldCollapse) {
+                            li.classList.toggle('listitem-folded', shouldCollapse);
+                            scheduleOutlinePass();
+                        }
+                    }, 250);
                     // Let Thymer apply listitem-folded, then re-sync our
                     // mirror class + caret + has-children stickiness.
                     scheduleOutlinePass();
@@ -4308,15 +4429,11 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             if (!t || !t.closest) return;
             // Remember any listitem we pass through so we can reuse it
             // as the anchor when the pointer leaves .listitem for
-            // the drag-handle element (a DOM-disjoint sibling).
+            // .item-drag-handle (a DOM-disjoint sibling).
             const li = t.closest('.listitem');
             if (li) lastHoveredLi = li;
             if (!isEnabled || !isTogglesEnabled || !isBulletsEnabled) return;
-            // [class*="item-drag-handle"] matches both the legacy class
-            // and Thymer's renamed `.item-drag-handle-style` variant
-            // (and the case where the link-menu element itself carries
-            // the class on current builds).
-            const dh = t.closest('[class*="item-drag-handle"]');
+            const dh = t.closest('.item-drag-handle');
             if (!dh) {
                 // Mouse is somewhere other than the drag-handle — let
                 // CSS :hover drive the rectangle.
@@ -4346,7 +4463,7 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             // Still inside the drag-handle or the anchored listitem →
             // keep the class.
             if (to && to.closest) {
-                if (to.closest('[class*="item-drag-handle"]')) return;
+                if (to.closest('.item-drag-handle')) return;
                 if (to.closest('.listitem') === lastDragHoverLi) return;
             }
             clearDragHover();
