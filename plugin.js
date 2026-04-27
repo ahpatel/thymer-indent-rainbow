@@ -359,20 +359,23 @@ body.ir-enabled .listitem-olist .listitem-indentline {
    caret-to-bullet distance in .bt-marker (caret 18px + 2px gap, with both
    elements centered within their column). */
 body.ir-enabled.bt-bullets {
-    --ir-bullet-shift: -10px;
+    /* -10px puts the guide under the bullet column when chevrons
+       are off; the additional -20pt lands it on the bullet's actual
+       vertical axis after the bullet column's intrinsic offset
+       inside the in-row marker. */
+    --ir-bullet-shift: calc(-10px - 20pt);
 }
 
 /* Both-on mode adds 5pt of margin-right on .bt-marker so row text
    clears the hover frame's right edge. That margin also pushes the
    downstream indent-line to the right, so compensate here with an
-   additional 5pt of leftward shift to keep the guides under the
-   bullets / numbers / chevrons.
-   The 4.5pt rightward bump (-5pt + 4.5pt = -0.5pt net) lands the
-   guides directly under the bullet/number column after the
-   icon-cluster's 2px-left shift; without it the lines were drifting
-   left of the bullets. */
+   additional leftward shift to keep the guides under the
+   bullets / numbers / chevrons. After the icon-cluster's 2px-left
+   shift, -1.5pt lands the guides directly under the bullet column.
+   (Earlier rounds tried -5pt and -0.5pt; -1.5pt was the user's
+   measured target.) */
 body.ir-enabled.bt-bullets.bt-toggles {
-    --ir-bullet-shift: calc(-10px - 0.5pt);
+    --ir-bullet-shift: calc(-10px - 1.5pt);
 }
 
 /* Toggles-only mode (chevrons enabled, bullets disabled): the indent
@@ -3524,8 +3527,15 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             // changed meaningfully (sub-pixel noise on rapid repositions).
             const prev = parseFloat(handle.style.top);
             if (Number.isFinite(prev) && Math.abs(prev - offsetTop) < 0.5) return;
-            handle.style.top = offsetTop + 'px';
-            handle.style.bottom = 'auto';
+            // setProperty with 'important' so we beat the CSS fallback
+            // rule's `top: calc(1em - 14.5px) !important`. Without the
+            // 'important' on the inline write, plain handle.style.top
+            // loses to the author rule and the JS measurement is silently
+            // discarded -- the symptom from earlier rounds where the
+            // drag-circle stayed at the CSS-default position on wrapped
+            // rows even though alignDragHandleToFirstLine ran cleanly.
+            handle.style.setProperty('top', `${offsetTop}px`, 'important');
+            handle.style.setProperty('bottom', 'auto', 'important');
         };
 
         // Per-menu style observer. Thymer re-uses a single `.link-menu`
@@ -3592,8 +3602,11 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                 ? linkMenu.querySelector('.item-drag-handle')
                 : null;
             if (handle) {
-                handle.style.top = '';
-                handle.style.bottom = '';
+                // removeProperty so the !important inline writes from
+                // alignDragHandleToFirstLine don't linger when the menu
+                // is reused for a different row.
+                handle.style.removeProperty('top');
+                handle.style.removeProperty('bottom');
             }
         };
         const linkMenuObserver = new MutationObserver((mutations) => {
