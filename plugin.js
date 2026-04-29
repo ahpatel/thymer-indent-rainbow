@@ -646,6 +646,12 @@ body.ir-enabled .listitem.listitem-olist > .bt-marker {
     transform: translateY(-50%) !important;
 }
 
+body.ir-enabled .listitem.listitem-ulist:has(> .line-bullet-div) > .bt-marker {
+    top: var(--bt-native-bullet-marker-top, -10px) !important;
+    height: 1lh !important;
+    transform: none !important;
+}
+
 /* Heading rows (H1–H6) lack the listitem-text/task/ulist/olist classes
    (see Thymer-DOM contract block at the top). Their native text is
    taller than the fixed-size caret/bullet icons, so the default
@@ -1924,6 +1930,42 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             li.style.removeProperty('--bt-indent');
         };
 
+        const syncNativeBulletMarkerTop = (li) => {
+            if (!li) return;
+            const marker = li.querySelector(':scope > .bt-marker');
+            const nativeBullet = li.querySelector(':scope > .line-bullet-div');
+            if (!marker || !nativeBullet) {
+                li.style.removeProperty('--bt-native-bullet-marker-top');
+                return;
+            }
+            const liRect = li.getBoundingClientRect();
+            const bulletRect = nativeBullet.getBoundingClientRect();
+            const markerHeight = marker.getBoundingClientRect().height || 0;
+            if (!liRect.height || !markerHeight) {
+                li.style.removeProperty('--bt-native-bullet-marker-top');
+                return;
+            }
+            let targetCenterY;
+            if (bulletRect.height > 0) {
+                targetCenterY = bulletRect.top + (bulletRect.height / 2);
+            } else {
+                const lineDiv = li.querySelector(':scope > .line-div');
+                if (!lineDiv) {
+                    li.style.removeProperty('--bt-native-bullet-marker-top');
+                    return;
+                }
+                const lineRect = lineDiv.getBoundingClientRect();
+                const lineHeight = parseFloat(getComputedStyle(lineDiv).lineHeight);
+                if (!lineRect.height || isNaN(lineHeight) || lineHeight <= 0) {
+                    li.style.removeProperty('--bt-native-bullet-marker-top');
+                    return;
+                }
+                targetCenterY = lineRect.top + (Math.min(lineRect.height, lineHeight) / 2);
+            }
+            const markerTop = targetCenterY - liRect.top - (markerHeight / 2);
+            li.style.setProperty('--bt-native-bullet-marker-top', `${Math.round(markerTop)}px`);
+        };
+
         // Inject (or re-sync) the .bt-marker wrapper as the first child of
         // a .listitem. Mirrors the row's native indent onto --bt-indent so
         // the absolute marker tracks hierarchy depth without mutating
@@ -1939,6 +1981,7 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                 // in case Thymer changed .line-div's marginLeft (Tab,
                 // Shift+Tab, drag-reorder, etc).
                 syncIndentVar(li);
+                syncNativeBulletMarkerTop(li);
                 return;
             }
             marker = document.createElement('span');
@@ -1979,6 +2022,7 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             outlineMutating = true;
             li.insertBefore(marker, li.firstElementChild);
             syncIndentVar(li);
+            syncNativeBulletMarkerTop(li);
             outlineMutating = false;
             // Mirror Thymer's native rich tooltips (data-tooltip-html +
             // tooltip class) onto our new caret + bullet. No-op until
