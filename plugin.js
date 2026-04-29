@@ -61,11 +61,11 @@ class Plugin extends AppPlugin {
         //   .link-menu             hover popup anchored to a row;
         //                          contains .item-drag-handle and
         //                          native zoom / collapse buttons.
-        //   .item-drag-handle      the floating circle we restyle
-        //                          as the drag/options affordance.
+        //   .item-drag-handle      Thymer-owned floating drag circle.
+        //                          We observe it for row-menu detection
+        //                          but do not restyle/reposition it.
         //   .handle-fold-icon      Thymer's inner SVG inside
-        //                          .item-drag-handle (we hide it
-        //                          and replace with a dots glyph).
+        //                          .item-drag-handle.
         //   .link-menu-action-collapse, .link-menu-action-expand,
         //   .link-menu-action-zoom
         //                          native action buttons in the
@@ -378,15 +378,6 @@ body.ir-enabled.bt-bullets.bt-toggles {
     --ir-bullet-shift: calc(-10px - 1.5pt);
 }
 
-/* Toggles-only mode (chevrons enabled, bullets disabled): the indent
-   line falls just left of the chevron's center. A 1pt rightward nudge
-   centers the line on the chevron's vertical axis. Distinct from the
-   bt-bullets variants -- those compensate for a moved bullet column
-   the user is looking at; here the chevron IS the visual landmark. */
-body.ir-enabled.bt-toggles:not(.bt-bullets) {
-    --ir-bullet-shift: 1pt;
-}
-
 /* Base: nudge applies to every indent line (catches headings + text + task). */
 body.ir-enabled .listitem-indentline {
     transform: translateX(calc(-2px + var(--ir-align-nudge) + var(--ir-bullet-shift))) !important;
@@ -561,30 +552,21 @@ body.ir-enabled.bt-toggles .bt-marker {
 }
 /* ---------- end cursor-placement spike ---------- */
 
-/* Both-on mode: wrap [drag-circle | chevron | bullet] in a soft
-   rectangle on row hover. Drawn as a ::before pseudo-element on
-   .bt-marker, inflated to the left by 30px so it visually encloses
-   the drag circle (which Thymer positions inside .link-menu at
-   left:-54px, i.e. just left of the marker). Pointer-transparent so
-   it never steals fold/drag clicks; z-index:-1 keeps caret/bullet
-   rendering on top.
-   .bt-drag-hover is added to the listitem by JS when the mouse is
-   over the drag-handle — necessary because .link-menu isn't a DOM
-   descendant of .listitem, so plain .listitem:hover drops while the
-   mouse is on the drag circle. */
+/* Both-on mode: wrap the plugin-owned drag proxy, chevron, and bullet in
+   a soft row affordance. The ::before frame is pointer-transparent; the
+   real native drag surface remains interactive but visually hidden, while
+   ::after draws the six-dot drag proxy that aligns with that native hit
+   zone. */
 /* Reserve breathing room after the marker in both-on mode so the row
    text doesn't sit under the hover frame's right edge when it paints. */
 body.ir-enabled.bt-bullets.bt-toggles .bt-marker {
     margin-right: 5pt;
+    width: 44px;
 }
 /* Shift the caret+bullet cluster 2px (= ~2pt user) left within the
-   marker so the gap between the in-row icons and the drag-handle
-   reads visually even with the gap between caret and bullet. The
-   drag-handle's left:-67px override + this shift together place the
-   drag-handle's slot right edge 4px from the caret's left edge,
-   matching the 2px caret-to-bullet gap (with 2px of slot padding
-   accounting for the rest). transform on each child instead of on
-   the marker so the absolute ::before hover frame is unaffected. */
+   marker so the custom controls sit cleanly inside their own frame.
+   transform on each child instead of on the marker so the absolute
+   ::before hover frame is unaffected. */
 body.ir-enabled.bt-bullets.bt-toggles .bt-marker > .bt-caret,
 body.ir-enabled.bt-bullets.bt-toggles .bt-marker > .bt-bullet {
     transform: translateX(-2px);
@@ -592,35 +574,11 @@ body.ir-enabled.bt-bullets.bt-toggles .bt-marker > .bt-bullet {
 body.ir-enabled.bt-bullets.bt-toggles .bt-marker::before {
     content: "";
     position: absolute;
-    /* Match Thymer's native link-menu popup dimensions (~83pt wide,
-       28pt tall) and its pill silhouette so the both-on cluster reads
-       as a first-class UI affordance. Height is set via symmetric
-       top/bottom insets that land 28pt total around the marker
-       midline; width is driven by extending the left inset so the
-       drag circle (at left:-24px) falls inside. */
-    /* Pin the rectangle to a FIXED 28pt height anchored on the marker's
-       vertical midline -- matches Thymer's native link-menu popup
-       height exactly. Previously sized via -3pt/-3.25pt insets off the
-       marker box; that worked when the marker was inline-flex (sized to
-       its 18px icon content) but inflated to ~30px after the marker
-       grew to height:1lh (~22px text line-height) in the cursor spike.
-       Explicit height + center-anchor keeps the frame at 28pt
-       regardless of marker box size. 14pt = half of 28 (centers the
-       rectangle on the marker midline).
-       Left inset (-44pt) reaches across the gutter to wrap the drag
-       circle (left:-90px relative to link-menu, which Thymer anchors
-       at the listitem's content edge -- i.e. 36px right of the marker
-       after our padding-left:36 reserves the marker zone). Right inset
-       (-3pt) keeps the original 4.75pt visual margin past the bullet. */
     top: calc(50% - 15px);
     bottom: auto;
     height: 30px;
-    /* -35px lands 4px left of the drag-handle's slot left edge
-       (drag-handle slot now at marker.left - 31 after we tightened
-       its left:-90 to -67). 4px wraps the visible ring with even
-       padding to match the right side. */
-    left: -35px;
-    right: -4px;
+    left: -24px;
+    right: 4px;
     border-radius: 4pt;
     background: transparent;
     border: 1px solid transparent;
@@ -628,15 +586,32 @@ body.ir-enabled.bt-bullets.bt-toggles .bt-marker::before {
     z-index: -1;
     transition: background-color 0.12s ease, border-color 0.12s ease;
 }
+body.ir-enabled.bt-bullets.bt-toggles .bt-marker::after {
+    content: "";
+    position: absolute;
+    top: calc(50% - 9px);
+    left: -18px;
+    width: 16px;
+    height: 16px;
+    color: currentColor;
+    background:
+        radial-gradient(circle at 36% 27%, currentColor 1px, transparent 1.25px),
+        radial-gradient(circle at 64% 27%, currentColor 1px, transparent 1.25px),
+        radial-gradient(circle at 36% 50%, currentColor 1px, transparent 1.25px),
+        radial-gradient(circle at 64% 50%, currentColor 1px, transparent 1.25px),
+        radial-gradient(circle at 36% 73%, currentColor 1px, transparent 1.25px),
+        radial-gradient(circle at 64% 73%, currentColor 1px, transparent 1.25px);
+    opacity: 0;
+    pointer-events: none;
+    z-index: 1;
+}
 /* Hover-frame paint is suppressed while the user is interacting via
    keyboard. Thymer hides its native popup when the cursor moves with
    keyboard shortcuts; mirror that on our hover frame so a stale
    :hover state from before the keystroke doesn't leave the frame
    painted on a row the user is no longer focused on visually.
    bt-keyboard-active is toggled on body by the keyboard listener
-   below (added on keydown, cleared on the next mousemove).
-   bt-drag-hover stays unconditional -- if the user is dragging,
-   they're using the mouse, so the frame should always paint. */
+   below (added on keydown, cleared on the next mousemove). */
 body.ir-enabled.bt-bullets.bt-toggles.ir-hover-frame:not(.bt-keyboard-active) .listitem:hover > .bt-marker::before,
 body.ir-enabled.bt-bullets.bt-toggles.ir-hover-frame .listitem.bt-drag-hover > .bt-marker::before {
     /* Paint an opaque fill that's *darker* than the page bg so the
@@ -650,6 +625,25 @@ body.ir-enabled.bt-bullets.bt-toggles.ir-hover-frame .listitem.bt-drag-hover > .
         var(--ir-marker-knockout-bg) 50%,
         #000 15%);
     border-color: color-mix(in srgb, currentColor 28%, transparent);
+}
+body.ir-enabled.bt-bullets.bt-toggles.ir-hover-frame .listitem.bt-drag-hover > .bt-marker::after,
+body.ir-enabled.bt-bullets.bt-toggles .listitem.bt-mouse-target > .bt-marker::after,
+body.ir-enabled.bt-bullets.bt-toggles .listitem.bt-focused > .bt-marker::after {
+    opacity: 0.55;
+}
+
+/* Normal editable rows can wrap, and Thymer's native drag circle stays
+   centered on the full row block rather than pinned to the first line.
+   Match that behavior for our injected marker cluster so the caret,
+   bullet, and hover frame stay aligned with the drag circle on multi-
+   line rows while remaining visually unchanged for single-line rows. */
+body.ir-enabled .listitem.listitem-text > .bt-marker,
+body.ir-enabled .listitem.listitem-task > .bt-marker,
+body.ir-enabled .listitem.listitem-ulist > .bt-marker,
+body.ir-enabled .listitem.listitem-olist > .bt-marker {
+    top: 50% !important;
+    height: auto !important;
+    transform: translateY(-50%) !important;
 }
 
 /* Heading rows (H1–H6) lack the listitem-text/task/ulist/olist classes
@@ -803,6 +797,18 @@ body.ir-enabled.bt-toggles .listitem.bt-has-children > .bt-marker > .bt-caret {
 body.ir-enabled.bt-toggles .listitem.bt-has-children > .bt-marker > .bt-caret:hover {
     opacity: 0.95;
 }
+body.ir-enabled.bt-toggles .listitem.bt-has-children.bt-empty-only-children > .bt-marker > .bt-caret,
+body.ir-enabled.bt-toggles .listitem.bt-has-children.bt-empty-only-children > .bt-marker > .bt-caret:hover {
+    opacity: 0.14;
+    pointer-events: none;
+    cursor: default;
+}
+body.ir-enabled.bt-toggles .listitem.bt-empty > .bt-marker > .bt-caret,
+body.ir-enabled.bt-toggles .listitem.bt-empty > .bt-marker > .bt-caret:hover {
+    opacity: 0;
+    pointer-events: none;
+    cursor: default;
+}
 
 /* ---------- Bullet (clickable dot) ---------- */
 
@@ -887,14 +893,12 @@ body.ir-enabled .bt-bullet:active::after {
    visual cue that the row has children even when carets aren't the
    primary affordance. The inner dot is drawn with an inset box-shadow
    so we don't need a second pseudo-element. */
-body.ir-enabled.bt-bullets .listitem.bt-has-children > .bt-marker > .bt-bullet::after {
+body.ir-enabled.bt-bullets .listitem.bt-has-children > .bt-marker > .bt-bullet:hover::after,
+body.ir-enabled.bt-bullets .listitem.bt-has-children.bt-collapsed > .bt-marker > .bt-bullet::after {
     background: transparent;
     border: 1.5px solid rgba(128, 128, 128, 0.65);
     box-shadow: inset 0 0 0 2.5px var(--bt-bullet-fill);
     opacity: 0.75;
-}
-body.ir-enabled.bt-bullets .listitem.bt-has-children > .bt-marker > .bt-bullet:hover::after {
-    box-shadow: inset 0 0 0 2.5px var(--bt-bullet-fill);
 }
 
 /* Collapsed parents: add an outer halo behind the bullet so it's obvious
@@ -957,13 +961,10 @@ body.ir-enabled .listitem.bt-zoom-start-line > .line-div {
 /* ---------- Hover-menu adjustments when our caret is active ----------
      1. Hide the native collapse/expand chevrons in .link-menu (our
         .bt-caret is the single collapse affordance).
-     2. Replace the fold-icon SVG inside .item-drag-handle with a dots
-        glyph, so the drag/options affordance is visually obvious and
-        the click zone lands directly on what the user sees. (Force-
-        showing .link-menu-action-options doesn't work because Thymer's
-        action handlers only fire when the link-menu is activated by
-        a real drag-handle hover; clicks on a CSS-revealed options
-        button are no-ops.) ---------- */
+     2. In both-on mode, hide the native row-menu visuals but keep their
+        pointer surface alive; the plugin-owned .bt-marker::after proxy
+        supplies the visible drag affordance while native drag continues
+        to own the actual hit zone. ---------- */
 /* Hide native collapse/expand from the link-menu whenever our in-row
    .bt-caret is active (body.bt-toggles). The row caret is the single
    collapse affordance — regardless of whether bullets are also on.
@@ -997,173 +998,10 @@ body.ir-enabled.bt-bullets .link-menu.bt-row-menu .link-menu-action-zoom {
     display: none !important;
 }
 
-/* Replace the drag-handle's fold-icon SVG with a dots glyph. We use
-   flex layout on the handle itself to center the ::after, instead of
-   position: absolute + inset: 0. Flex only changes how CHILDREN are
-   laid out; it does NOT touch the handle's own positioning scheme
-   (Thymer keeps its position: absolute), so the hover menu continues
-   to follow the cursor. display: none on the SVG removes it from the
-   flex flow so the ::after is the sole centered child. */
-body.ir-enabled.bt-toggles [class*="item-drag-handle"],
-body.ir-enabled.bt-bullets [class*="item-drag-handle"] {
-    display: flex !important;
-    align-items: center;
-    justify-content: center;
-}
-
-/* Pin the drag-handle popup to the FIRST line of wrapped rows (mirrors
-   the .bt-marker alignment fix). Thymer positions .item-drag-handle
-   absolutely and centers it vertically on the listitem's full box, so
-   on wrapped rows the circle floats between lines. Overriding top to
-   (1lh - 30px) / 2 lands the 27px circle's vertical center on the
-   first-line midline regardless of row height. bottom: auto prevents
-   Thymer's bottom-anchor from fighting our top.
-
-   NOTE: This rule is a FALLBACK. The canonical alignment is now set
-   by alignDragHandleToFirstLine() in JS, which measures the anchored
-   row's first-line midline against the .link-menu's actual top (see
-   linkMenuObserver). JS is needed because Thymer positions .link-menu
-   differently for last-in-hierarchy wrapped rows (popup centered on
-   the full row box, not its top) — pure CSS can't recover from that
-   since we don't know the delta statically. JS inline top naturally
-   wins over this calc. */
-body.ir-enabled.bt-toggles [class*="item-drag-handle"],
-body.ir-enabled.bt-bullets [class*="item-drag-handle"] {
-    /* Pin the circle to the row's FIRST text baseline, matching where
-       .bt-marker's caret + bullet land. We measure from the top of
-       the row: 'top: calc(.5em - 13.5px)' puts the circle's vertical
-       center on the baseline of the first line's em-box (approx.
-       text baseline), regardless of the row's total height on
-       wrapped rows. 1em resolves to the listitem's own font-size, so
-       headings and body text both line up. */
-    top: calc(1em - 14.5px) !important;
-    /* -24px previously produced an 11pt gap between the circle and
-       the chevron; +5pt rightward (≈ 6.67px) closes that gap to the
-       intended 6pt, matching the chevron↔bullet spacing. */
-    left: calc(-24px - 3.25pt) !important;
-    bottom: auto !important;
-    /* Stack above .bt-marker (z-index: 11) so the both-on hover
-       rectangle's opaque ::before (painted as part of bt-marker's
-       stacking context) doesn't cover the drag circle. */
-    z-index: 12 !important;
-}
-body.ir-enabled.bt-toggles [class*="item-drag-handle"] .handle-fold-icon,
-body.ir-enabled.bt-bullets [class*="item-drag-handle"] .handle-fold-icon {
-    display: none;
-}
-/* No inner glyph — match native drag circle (dashed ring, empty
-   interior). The ::after remains declared so Thymer's own fold-icon
-   SVG stays hidden via display:none above without anything else
-   jumping in to fill the circle. */
-body.ir-enabled.bt-toggles [class*="item-drag-handle"]::after,
-body.ir-enabled.bt-bullets [class*="item-drag-handle"]::after {
-    content: none;
-}
-
-/* Uniform 27px slots for every .link-menu component. Thymer's native
-   popup is 81pt wide with three components (zoom ↗, collapse/expand ∨,
-   drag-handle ○) — exactly 27pt per slot. By pinning each component
-   to 27px here, the popup naturally renders at 27 / 54 / 81pt based
-   on how many children are visible (collapse/expand/zoom get hidden
-   individually elsewhere, never the popup itself). This replaces the
-   previous transform-shift hacks that tried to reposition the drag-
-   handle visually — unnecessary once each slot has a predictable
-   width and the drag-handle is ordered first (see below). */
-body.ir-enabled .link-menu.bt-row-menu .link-menu-action-zoom,
-body.ir-enabled .link-menu.bt-row-menu .link-menu-action-collapse,
-body.ir-enabled .link-menu.bt-row-menu .link-menu-action-expand,
-body.ir-enabled .link-menu.bt-row-menu[class*="item-drag-handle"],
-body.ir-enabled .link-menu.bt-row-menu [class*="item-drag-handle"] {
-    flex: 0 0 27px !important;
-    width: 27px !important;
-    min-width: 27px !important;
-    max-width: 27px !important;
-    box-sizing: border-box;
-}
-
-/* Square up the drag-handle so its native dotted border wraps a 27x27
-   circle that fills the slot. Previously the width override made the
-   slot 27px wide while the native height was smaller, producing an
-   oval whose hit-zone (full 27px slot) did not visually match the
-   narrower dotted ring — so hovering the empty slot edge was firing
-   the drag/options menu while hovering the visible ring looked inert.
-   Matching width to height ties the hit-zone to what the user sees.
-   The drag-handle is placed first in DOM order by a MutationObserver
-   (see link-menu observer below) — CSS 'order' appeared to desync
-   Thymer's hit-zone from the visible ring in some states, so we do
-   a real reparent instead. */
-body.ir-enabled.bt-toggles .link-menu.bt-row-menu[class*="item-drag-handle"],
-body.ir-enabled.bt-bullets .link-menu.bt-row-menu[class*="item-drag-handle"],
-body.ir-enabled.bt-toggles .link-menu.bt-row-menu [class*="item-drag-handle"],
-body.ir-enabled.bt-bullets .link-menu.bt-row-menu [class*="item-drag-handle"] {
-    height: 27px !important;
-}
-
-/* Both-on: shift ONLY the drag-handle (the visible circle) 27px to the
-   left using 'position: relative; left: -27px'. 'left' (unlike
-   'transform') updates offsetLeft / layout origin, so both the visible
-   ring AND its hover/click hit-zone move together. The '.link-menu'
-   wrapper stays at its natural 27pt width and original position, so
-   Thymer's own popup anchoring is untouched. Scoped to both-on only;
-   single-feature/native states are unchanged. */
-/* Shrink the .link-menu container's pointer/layout footprint to the
-   27pt drag-handle slot so the rest of the popup's box doesn't cover
-   and steal clicks from the in-row .bt-caret. overflow: visible lets
-   the drag-handle's left/transform offsets paint outside the shrunk
-   container. pointer-events: none on the container + auto on the
-   drag-handle keeps the circle interactive while letting clicks on
-   the caret column pass through to .bt-caret underneath. */
-body.ir-enabled.bt-toggles.bt-bullets .link-menu.bt-row-menu {
-    width: 27px !important;
-    min-width: 27px !important;
-    max-width: 27px !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    overflow: visible !important;
-    pointer-events: none !important;
-    background: transparent !important;
-    border: none !important;
-    outline: none !important;
-    box-shadow: none !important;
-    backdrop-filter: none !important;
-}
-/* Kill any pseudo-element chrome (dashed outlines, highlight rings,
-   etc.) the native stylesheet draws on .link-menu so only the
-   drag-handle's own circle remains visible in both-on. Same
-   .bt-row-menu scope so inline page-link popups keep their native
-   pill chrome (background, border, shadow). */
-body.ir-enabled.bt-toggles.bt-bullets .link-menu.bt-row-menu::before,
-body.ir-enabled.bt-toggles.bt-bullets .link-menu.bt-row-menu::after {
-    content: none !important;
-    background: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-}
-body.ir-enabled.bt-toggles.bt-bullets .link-menu.bt-row-menu[class*="item-drag-handle"],
-body.ir-enabled.bt-toggles.bt-bullets .link-menu.bt-row-menu [class*="item-drag-handle"] {
+body.ir-enabled.bt-bullets.bt-toggles .link-menu.bt-row-menu {
+    margin-left: var(--bt-native-row-menu-offset-x, -1px) !important;
+    opacity: 0 !important;
     pointer-events: auto !important;
-    position: relative !important;
-    /* Shift the drag circle all the way to the LEFT of the chevron.
-       27px = one drag-handle slot (gets us over the bullet/chevron
-       column); another 27px clears the full .bt-marker (caret 18px +
-       gap 2px + bullet ~18px + padding/border ~4px). Tune if the
-       rectangle's padding in the both-on marker rule changes. */
-    /* Was -54px before the cursor-placement spike. With the listitem
-       now reserving 36px of padding-left for the absolute marker, the
-       link-menu (which Thymer anchors to the listitem's content edge,
-       i.e. AFTER our padding) sits 36px further right than it used to.
-       Adding another -36px (-54 - 36 = -90) keeps the drag circle in
-       the same drag-gutter column it occupied with the inline marker.
-       Tune in tandem if the listitem padding-left changes.
-       Bumped from -90 to -67 so the drag-handle's slot right edge
-       lands 4px left of the bt-caret's left edge (which is at
-       marker.left - 2px after the icon-cluster's 2px-left shift; see
-       the .bt-caret/.bt-bullet rule). 4px = 2px slot-padding +
-       2px visual gap, matching the gap between caret and bullet so
-       all three icons read as one evenly-spaced cluster. */
-    left: -67px !important;
-    /* Visual-only nudge: the hit-zone (set by 'left' above) is correct, but the painted ring sits ~20px too far right. transform shifts paint without touching layout, so the hit-zone stays put while the circle visually aligns with the drag-gutter. */
-    transform: translateX(0px) !important;
 }
 
 /* ---------- Skip-panel scope ----------
@@ -1275,14 +1113,8 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
     opacity: 1;
     transition: opacity 0.15s ease-in;
 }
-/* Caret's rest opacity on parent rows is 0.55 (see the main caret
-   rule); match that on the restored state so the fade-in lands at
-   the same visual weight it would have in a non-blank row. */
-body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty:hover > .bt-marker > .bt-caret,
-body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker > .bt-caret {
-    opacity: 0.55;
-    transition: opacity 0.15s ease-in;
-}
+/* Empty rows restore only the bullet on hover/focus. The caret remains
+   hidden because an empty parent cannot be meaningfully collapsed. */
 
 /* ---------- Print stylesheet ----------
    Suppress all plugin-injected visuals when printing. The native
@@ -1339,15 +1171,18 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
         // Toggle the ir-enabled body class which gates all our CSS rules.
         // Also sets exactly one of ir-bullets-neutral / -hover / -always so
         // the CSS can pick the right --bt-bullet-fill override.
+        const usesCustomOutlineMode = () => (
+            isEnabled && isBulletsEnabled && isTogglesEnabled
+        );
         const applyEnabledState = () => {
             document.body.classList.toggle('ir-enabled', isEnabled);
-            document.body.classList.toggle('bt-bullets', isEnabled && isBulletsEnabled);
-            document.body.classList.toggle('bt-toggles', isEnabled && isTogglesEnabled);
+            document.body.classList.toggle('bt-bullets', usesCustomOutlineMode());
+            document.body.classList.toggle('bt-toggles', usesCustomOutlineMode());
             document.body.classList.toggle('ir-bullets-neutral', bulletColorMode === 'neutral');
             document.body.classList.toggle('ir-bullets-hover', bulletColorMode === 'hover');
             document.body.classList.toggle('ir-bullets-always', bulletColorMode === 'always');
             document.body.classList.toggle('ir-hover-frame',
-                isEnabled && isHoverFrameEnabled);
+                usesCustomOutlineMode() && isHoverFrameEnabled);
         };
 
         // Inject the static stylesheet once.
@@ -1597,7 +1432,7 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                             for (let ci = 0; ci < targetPointNode.children.length; ci++) {
                                 const ch = targetPointNode.children[ci];
                                 if (ch.style && ch.style.marginLeft && parseInt(ch.style.marginLeft) > 0) {
-                                    armEndX = ch.getBoundingClientRect().left;
+                                    armEndX = ch.getBoundingClientRect().left - 45;
                                     break;
                                 }
                             }
@@ -1606,7 +1441,7 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                                 const pRect = pIndent.getBoundingClientRect();
                                 const pContainerRect = pIndent.parentElement.getBoundingClientRect();
 
-                                const h = tY - pRect.top;
+                                const h = tY - pRect.top + 1;
                                 const w = Math.max(14, armEndX - pRect.left);
 
                                 if (h > 0) {
@@ -1673,7 +1508,7 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                                 if (donorLeft !== null && pMarker) {
                                     const mRect = pMarker.getBoundingClientRect();
                                     const armTopY = mRect.top + (mRect.height / 2);
-                                    const h = tY - armTopY;
+                                    const h = tY - armTopY + 1;
                                     if (h > 0) {
                                         const pContainerRect = pContainer.getBoundingClientRect();
                                         // Resolve CSS var once so the
@@ -2213,32 +2048,44 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             outlineMutating = false;
         };
 
+        const itemHasOwnContent = (item) => {
+            const lineDiv = item.querySelector(':scope > .line-div');
+            const root = lineDiv || item;
+            for (const n of root.childNodes) {
+                if (n.nodeType === 1 && n.classList
+                    && (n.classList.contains('listitem-indentline')
+                        || n.classList.contains('bt-active-highlight')
+                        || n.classList.contains('bt-marker')
+                        || n.classList.contains('listitem'))) continue;
+                const txt = n.textContent;
+                if (txt && txt.trim().length > 0) return true;
+            }
+            return false;
+        };
+
+        const setEmptyOnlyChildrenClass = (li, hasChild, hasContentfulChild) => {
+            const folded = li.classList.contains('listitem-folded')
+                || li.classList.contains('bt-collapsed');
+            li.classList.toggle('bt-empty-only-children', hasChild && !folded && !hasContentfulChild);
+        };
+
         // Synchronously classify a parent row as has-children / not, given
         // the presence of a deeper-indented next sibling in document order.
         const updateHasChildrenFor = (li) => {
             if (!li || !li.classList?.contains('listitem')) return;
             const myIndent = getItemIndent(li);
-            // Look ahead in document order (flat-DOM model) for the next
-            // .listitem; if it's indented deeper, this row has children.
-            let walker = li;
+            const allItems = Array.from(editorContainer.querySelectorAll('.listitem'));
+            const idx = allItems.indexOf(li);
             let hasChild = false;
-            while (walker) {
-                const next = walker.nextElementSibling
-                    || (walker.parentElement && walker.parentElement !== document.body
-                        ? walker.parentElement.nextElementSibling : null);
-                if (!next) break;
-                if (next.classList && next.classList.contains('listitem')) {
+            let hasContentfulChild = false;
+            if (idx >= 0) {
+                for (let i = idx + 1; i < allItems.length; i++) {
+                    const next = allItems[i];
                     const nextIndent = getItemIndent(next);
-                    hasChild = nextIndent > myIndent;
-                    break;
-                }
-                // Skip non-listitem siblings (e.g., editor chrome).
-                walker = next;
-                if (walker.querySelector) {
-                    const firstLi = walker.querySelector('.listitem');
-                    if (firstLi) {
-                        const nextIndent = getItemIndent(firstLi);
-                        hasChild = nextIndent > myIndent;
+                    if (nextIndent <= myIndent) break;
+                    hasChild = true;
+                    if (itemHasOwnContent(next)) {
+                        hasContentfulChild = true;
                         break;
                     }
                 }
@@ -2253,9 +2100,15 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             // `.bt-collapsed` to cover the brief optimistic window.
             if (!hasChild && (li.classList.contains('listitem-folded')
                 || li.classList.contains('bt-collapsed'))) hasChild = true;
+            setEmptyOnlyChildrenClass(li, hasChild, hasContentfulChild);
             const currently = li.classList.contains('bt-has-children');
-            if (hasChild && !currently) li.classList.add('bt-has-children');
-            else if (!hasChild && currently) li.classList.remove('bt-has-children');
+            if (hasChild && !currently) {
+                li.classList.add('bt-has-children');
+                applyMarkerTooltips(li);
+            } else if (!hasChild && currently) {
+                li.classList.remove('bt-has-children');
+                applyMarkerTooltips(li);
+            }
         };
 
         // Find the `.listitem` that is the logical parent of `li` by walking
@@ -2289,26 +2142,38 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
         // editor isn't found, so functional coverage is unchanged.
         const annotateAll = () => {
             const items = Array.from(editorContainer.querySelectorAll('.listitem'));
-            if (!isEnabled || (!isBulletsEnabled && !isTogglesEnabled)) {
+            if (!usesCustomOutlineMode()) {
                 // Strip everything if disabled.
                 for (const li of items) {
                     removeMarker(li);
-                    li.classList.remove('bt-has-children', 'bt-collapsed', 'bt-zoom-start-line');
+                    li.classList.remove('bt-has-children', 'bt-empty-only-children', 'bt-collapsed', 'bt-zoom-start-line');
                     if (li.style.display === 'none') li.style.display = '';
                 }
                 return items;
             }
             for (const li of items) injectMarker(li);
-            // Flat-pass has-children: compare each row's indent to next row's.
-            // S4: cache the previous iteration's indent so we call
-            // getItemIndent once per row (instead of twice), and skip
-            // classList.add/remove when the state already matches.
-            let curIndent = items.length ? getItemIndent(items[0]) : 0;
+            // Flat-pass has-children: each deeper row marks all currently
+            // open ancestors as parents, and contentful descendants prevent
+            // the parent caret from being treated as empty-only.
+            const indents = items.map(getItemIndent);
+            const ownContent = items.map(itemHasOwnContent);
+            const hasDescendant = new Array(items.length).fill(false);
+            const hasContentfulDescendant = new Array(items.length).fill(false);
+            const ancestorStack = [];
+            for (let i = 0; i < items.length; i++) {
+                const indent = indents[i];
+                while (ancestorStack.length && ancestorStack[ancestorStack.length - 1].indent >= indent) {
+                    ancestorStack.pop();
+                }
+                for (const ancestor of ancestorStack) {
+                    hasDescendant[ancestor.index] = true;
+                    if (ownContent[i]) hasContentfulDescendant[ancestor.index] = true;
+                }
+                ancestorStack.push({ indent, index: i });
+            }
             for (let i = 0; i < items.length; i++) {
                 const cur = items[i];
-                const next = items[i + 1];
-                const nextIndent = next ? getItemIndent(next) : -1;
-                let hasChild = !!next && nextIndent > curIndent;
+                let hasChild = hasDescendant[i];
                 // Sticky: folded rows keep their caret even after Thymer
                 // removes their descendants from the DOM. Without this the
                 // user would have no way to re-expand the row. Source of
@@ -2316,10 +2181,10 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                 // `.bt-collapsed` also counts (optimistic window).
                 if (!hasChild && (cur.classList.contains('listitem-folded')
                     || cur.classList.contains('bt-collapsed'))) hasChild = true;
+                setEmptyOnlyChildrenClass(cur, hasChild, hasContentfulDescendant[i]);
                 const currently = cur.classList.contains('bt-has-children');
                 if (hasChild && !currently) cur.classList.add('bt-has-children');
                 else if (!hasChild && currently) cur.classList.remove('bt-has-children');
-                curIndent = nextIndent;
             }
             return items;
         };
@@ -3155,7 +3020,7 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
         const outlineObserver = new MutationObserver((mutations) => {
             if (this.isUnloaded) return;
             if (outlineMutating) return;
-            if (!isEnabled || (!isBulletsEnabled && !isTogglesEnabled)) return;
+            if (!usesCustomOutlineMode()) return;
 
             const addedListItems = [];
             let sawStructuralChange = false;
@@ -3220,6 +3085,7 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                         if (li.classList.contains('bt-has-children')) {
                             li.classList.remove('bt-has-children');
                         }
+                        li.classList.remove('bt-empty-only-children');
                     }
                 } finally {
                     outlineMutating = false;
@@ -3439,28 +3305,15 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             const bullet = marker.querySelector(':scope > .bt-bullet');
             if (bullet) applyTooltipAttrs(bullet, nativeTooltipAttrs.zoom);
             if (caret) {
-                const folded = li.classList.contains('listitem-folded');
-                const which = folded ? nativeTooltipAttrs.expand : nativeTooltipAttrs.collapse;
-                applyTooltipAttrs(caret, which);
+                const hasChildren = li.classList.contains('bt-has-children');
+                if (!hasChildren) {
+                    applyTooltipAttrs(caret, null);
+                } else {
+                    const folded = li.classList.contains('listitem-folded');
+                    const which = folded ? nativeTooltipAttrs.expand : nativeTooltipAttrs.collapse;
+                    applyTooltipAttrs(caret, which);
+                }
             }
-        };
-
-        // ----- link-menu drag-handle DOM reorder -----
-        // When Thymer injects a .link-menu hover popup, move .item-drag-handle
-        // to be the FIRST child so the drag circle renders on the left. We use
-        // a real reparent (not CSS `order`) because in some states Thymer's
-        // hit-zone appears to key off DOM order, producing a hotzone that sits
-        // between visible icons rather than on the circle.
-        const reorderLinkMenu = (linkMenu) => {
-            if (!linkMenu || !linkMenu.querySelector) return;
-            // Substring match: current builds use
-            // `item-drag-handle-style`, older builds used
-            // `item-drag-handle`. Either matches `[class*=...]`.
-            const handle = linkMenu.querySelector(
-                ':scope > [class*="item-drag-handle"]');
-            if (!handle) return;
-            if (linkMenu.firstElementChild === handle) return;
-            linkMenu.insertBefore(handle, linkMenu.firstElementChild);
         };
 
         // Tag link-menus that anchor to a row (i.e. contain a drag-handle
@@ -3497,184 +3350,32 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             linkMenu.classList.toggle('bt-row-menu', isRow);
         };
 
-        // Pin the drag circle to the anchored row's FIRST-line midline via
-        // JS-measured inline `top`. Necessary because Thymer positions the
-        // `.link-menu` absolutely based on the hovered row, and for
-        // last-in-hierarchy wrapped rows the popup's `top` isn't the row's
-        // top (observed: ends up centered on the full row box, placing our
-        // CSS `top: calc(1em - 14.5px)` offset on a later line). Measuring
-        // the delta between `linkMenu.top` and `row.firstLineTop` lets the
-        // alignment survive Thymer's positioning strategy for any row.
-        // The existing CSS rule remains as a fallback for the first paint
-        // and for the rare case where the anchored row can't be resolved.
-        const DRAG_HANDLE_RADIUS = 13.5; // half of 27px circle
-        // Measure the row's FIRST visible text line by walking to its
-        // first non-empty text node and reading the first rect from
-        // Range.getClientRects(). Returns { top, height } in viewport
-        // coords, or null if no measurable text was found. Range-based
-        // because getComputedStyle(row).lineHeight resolves to "normal"
-        // for many Thymer rows (especially headings / wrapped body
-        // text), which previously fell back to rowRect.height -- on
-        // wrapped rows that's the FULL multi-line box, so the
-        // computed firstLineMid landed at the row's vertical center
-        // and the drag-circle ended up dropped to mid-row (image 2).
-        const measureFirstTextLine = (row) => {
-            const lineDiv = row.querySelector(':scope > .line-div') || row;
-            // selectNodeContents() over the WHOLE line-div + reading
-            // rects[0] returns the first visual line of the row's
-            // content -- regardless of whether that content starts
-            // with a text node, an inline element (page-link, mention,
-            // tag, etc.), or a mix. The previous TreeWalker approach
-            // hopped to the first non-empty text node, which on rows
-            // with leading inline elements landed on whatever line the
-            // text BEGAN, not necessarily line 1 (observed in image 1
-            // of the wrap-alignment report: the drag-circle sat at
-            // line 2 because the first text node started after a
-            // leading inline element that pushed it past line 1).
-            const range = document.createRange();
-            range.selectNodeContents(lineDiv);
-            const rects = range.getClientRects();
-            if (!rects || rects.length === 0) return null;
-            // rects[0] = first visual line box. Height is the line's
-            // computed line-height; top is the line's top edge.
-            const r = rects[0];
-            if (r.height <= 0) return null;
-            return { top: r.top, height: r.height };
+        // Per-menu observer. Thymer re-uses a single `.link-menu` across
+        // hovered rows; observe it only to maintain our row-menu tag and
+        // capture native tooltip/fold metadata. Do not mutate drag-handle
+        // geometry here — native drag owns that surface.
+        let dragHoverRow = null;
+        const clearDragHoverRow = () => {
+            if (dragHoverRow?.classList) dragHoverRow.classList.remove('bt-drag-hover');
+            dragHoverRow = null;
         };
-        // Diagnostics gate. Set window.__irDragAlignDebug = true in the
-        // devtools console before hovering a wrapped row to surface why
-        // the drag-circle doesn't pin. Off by default so prod is silent.
-        const dbg = (...args) => {
-            try {
-                if (typeof window !== 'undefined' && window.__irDragAlignDebug) {
-                    console.log('[ir-drag-align]', ...args);
-                }
-            } catch (_) {}
-        };
-        const alignDragHandleToFirstLine = (linkMenu) => {
-            if (!linkMenu || !linkMenu.isConnected) {
-                dbg('bail: linkMenu missing/disconnected', { linkMenu });
-                return;
-            }
-            // CSS rules that pin the drag handle are gated on bt-toggles
-            // or bt-bullets -- match so we don't override the native look.
-            if (!isEnabled) { dbg('bail: !isEnabled'); return; }
-            if (!isBulletsEnabled && !isTogglesEnabled) {
-                dbg('bail: neither bullets nor toggles enabled');
-                return;
-            }
-            // The drag-handle can be EITHER a descendant OR the
-            // link-menu element itself, AND the class name varies:
-            // current builds use `item-drag-handle-style` /
-            // `item-drag-handle-editor-style`; older builds used
-            // `item-drag-handle`. Use a substring match on the class
-            // attribute so all variants resolve. Diagnostic logs
-            // showed link-menu's class list as `link-menu bt-row-menu
-            // item-drag-handle-style item-drag-handle-editor-style
-            // ...`, which the literal `.item-drag-handle` selector
-            // does not match (CSS class names don't substring-match).
-            const HANDLE_SELECTOR = '[class*="item-drag-handle"]';
-            const handle = linkMenu.matches(HANDLE_SELECTOR)
-                ? linkMenu
-                : linkMenu.querySelector(HANDLE_SELECTOR);
-            if (!handle) {
-                dbg('bail: no .item-drag-handle in linkMenu',
-                    { linkMenuHTML: linkMenu.outerHTML.slice(0, 300) });
-                return;
-            }
+        const setDragHoverRowFromMenu = (linkMenu) => {
+            clearDragHoverRow();
+            if (!linkMenu?.classList?.contains('bt-row-menu')) return;
             const guid = linkMenu.getAttribute('data-guid');
-            if (!guid) {
-                dbg('bail: linkMenu has no data-guid',
-                    { linkMenuClasses: linkMenu.className });
-                return;
-            }
-            const row = document.querySelector(
-                `.listitem[data-guid="${CSS.escape(guid)}"]`);
-            if (!row || !row.isConnected) {
-                dbg('bail: row lookup failed', { guid });
-                return;
-            }
-            const handleRect = handle.getBoundingClientRect();
-            if (handleRect.height === 0) {
-                dbg('bail: handleRect.height === 0', { handleRect });
-                return;
-            }
-            // Prefer the Range-based first-line measurement; fall back
-            // to the row's full box midline only when the row has no
-            // measurable text (rare: empty rows mid-creation).
-            let firstLineMidY;
-            let firstLineSource;
-            const firstLine = measureFirstTextLine(row);
-            if (firstLine) {
-                firstLineMidY = firstLine.top + firstLine.height / 2;
-                firstLineSource = 'measureFirstTextLine';
-            } else {
-                const rowRect = row.getBoundingClientRect();
-                if (rowRect.height === 0) {
-                    dbg('bail: rowRect.height === 0 + no firstLine');
-                    return;
-                }
-                firstLineMidY = rowRect.top + rowRect.height / 2;
-                firstLineSource = 'rowRect-fallback';
-            }
-            // Thymer's current build collapses .link-menu and
-            // .item-drag-handle onto the SAME element. That means
-            // `top: Xpx` set on the handle is positioned relative to
-            // its offsetParent (the editor / page container), not
-            // relative to the link-menu (which used to be the handle's
-            // containing block in older builds where they were
-            // separate). Compute desired top in offsetParent coords:
-            // handle's TOP edge should sit at firstLineMidY -
-            // DRAG_HANDLE_RADIUS in viewport space, so subtract the
-            // offsetParent's viewport top to convert.
-            const parent = handle.offsetParent || document.documentElement;
-            const parentRect = parent.getBoundingClientRect();
-            const desiredTopPx = firstLineMidY
-                - DRAG_HANDLE_RADIUS
-                - parentRect.top;
-            // Avoid layout thrash: skip re-writing when the value hasn't
-            // changed meaningfully (sub-pixel noise on rapid repositions).
-            const prev = parseFloat(handle.style.top);
-            if (Number.isFinite(prev) && Math.abs(prev - desiredTopPx) < 0.5) {
-                dbg('skip: desiredTopPx unchanged', { prev, desiredTopPx });
-                return;
-            }
-            // setProperty with 'important' so we beat both the CSS
-            // fallback rule's `top: calc(1em - 14.5px) !important` and
-            // any inline `!important` Thymer may set on its anchor.
-            handle.style.setProperty('top', `${desiredTopPx}px`, 'important');
-            handle.style.setProperty('bottom', 'auto', 'important');
-            dbg('wrote handle.style.top', {
-                guid, desiredTopPx, firstLineSource,
-                handleTop: handleRect.top,
-                parentTop: parentRect.top,
-                firstLineMidY,
-                rowRectTop: row.getBoundingClientRect().top,
-                rowRectHeight: row.getBoundingClientRect().height,
-                computedTop: getComputedStyle(handle).top,
-                handleStyleTop: handle.style.top,
-            });
-            // Verify on next frame whether our write survived.
-            requestAnimationFrame(() => {
-                const after = getComputedStyle(handle).top;
-                const newRect = handle.getBoundingClientRect();
-                dbg('post-rAF', {
-                    computedStyleTop: after,
-                    handleStyleTop: handle.style.top,
-                    handleRectTop: newRect.top,
-                    expectedRectTop: firstLineMidY - DRAG_HANDLE_RADIUS,
-                });
-            });
+            if (!guid) return;
+            const row = document.querySelector(`.listitem[data-guid="${CSS.escape(guid)}"]`);
+            if (!row?.classList) return;
+            row.classList.add('bt-drag-hover');
+            dragHoverRow = row;
         };
-
-        // Per-menu style observer. Thymer re-uses a single `.link-menu`
-        // across hovered rows by updating its inline `top`/`left` —
-        // meaning a child-attach observer alone only catches the first
-        // anchor. Watching `style` on each `.link-menu` catches the
-        // subsequent re-anchors and keeps the drag circle pinned.
         const perMenuObservers = new WeakMap();
         const attachPerMenuObserver = (linkMenu) => {
             if (!linkMenu || perMenuObservers.has(linkMenu)) return;
+            const onPointerEnter = () => setDragHoverRowFromMenu(linkMenu);
+            const onPointerLeave = () => clearDragHoverRow();
+            linkMenu.addEventListener('pointerenter', onPointerEnter);
+            linkMenu.addEventListener('pointerleave', onPointerLeave);
             const obs = new MutationObserver(() => {
                 if (this.isUnloaded) return;
                 // Re-evaluate row-menu tagging on each callback. The
@@ -3690,7 +3391,6 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                 if (!chevronsCaptured || !tooltipsCaptured) {
                     captureNativeTooltips(linkMenu);
                 }
-                alignDragHandleToFirstLine(linkMenu);
             });
             obs.observe(linkMenu, {
                 attributes: true,
@@ -3703,43 +3403,27 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                 childList: true,
                 subtree: true,
             });
-            perMenuObservers.set(linkMenu, obs);
+            perMenuObservers.set(linkMenu, { obs, onPointerEnter, onPointerLeave });
         };
         const onLinkMenuAdded = (linkMenu) => {
-            reorderLinkMenu(linkMenu);
             tagRowMenu(linkMenu);
             attachPerMenuObserver(linkMenu);
             // Harvest the native tooltip attributes + chevron clones off
             // this menu's action buttons. First successful capture triggers
             // a sweep across every existing .listitem's marker.
             captureNativeTooltips(linkMenu);
-            // rAF so Thymer's initial inline top/left are in place before
-            // we measure (style is assigned after insertion in some paths).
-            requestAnimationFrame(() => alignDragHandleToFirstLine(linkMenu));
         };
         const detachPerMenuObserver = (linkMenu) => {
-            const obs = perMenuObservers.get(linkMenu);
-            if (!obs) return;
-            try { obs.disconnect(); } catch (_) {}
+            const entry = perMenuObservers.get(linkMenu);
+            if (!entry) return;
+            try { entry.obs.disconnect(); } catch (_) {}
+            try { linkMenu.removeEventListener('pointerenter', entry.onPointerEnter); } catch (_) {}
+            try { linkMenu.removeEventListener('pointerleave', entry.onPointerLeave); } catch (_) {}
             perMenuObservers.delete(linkMenu);
+            clearDragHoverRow();
             // Strip our row-menu tag so a reused .link-menu doesn't
             // carry stale state into the next observation cycle.
             if (linkMenu.classList) linkMenu.classList.remove('bt-row-menu');
-            // Also strip our inline overrides so a reused .link-menu
-            // doesn't carry stale positioning into the next hover.
-            const HANDLE_SEL = '[class*="item-drag-handle"]';
-            const handle = linkMenu.matches && linkMenu.matches(HANDLE_SEL)
-                ? linkMenu
-                : (linkMenu.querySelector
-                    ? linkMenu.querySelector(HANDLE_SEL)
-                    : null);
-            if (handle) {
-                // removeProperty so the !important inline writes from
-                // alignDragHandleToFirstLine don't linger when the menu
-                // is reused for a different row.
-                handle.style.removeProperty('top');
-                handle.style.removeProperty('bottom');
-            }
         };
         const linkMenuObserver = new MutationObserver((mutations) => {
             if (this.isUnloaded) return;
@@ -3767,8 +3451,8 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
         outlineTarget.querySelectorAll('.link-menu').forEach(onLinkMenuAdded);
         this.cleanupMethods.push(() => {
             linkMenuObserver.disconnect();
-            // Tear down every per-menu observer + clear inline overrides
-            // so the plugin leaves no residual positioning behind.
+            // Tear down every per-menu observer so the plugin leaves no
+            // residual observation behind.
             document.querySelectorAll('.link-menu').forEach(detachPerMenuObserver);
         });
 
@@ -3910,11 +3594,22 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
         // where Thymer destroys / re-creates the menu when the user
         // moves between distant rows.
         let lastPrimedRow = null;
+        let mouseTargetRow = null;
+        const clearMouseTargetRow = () => {
+            if (mouseTargetRow?.classList) mouseTargetRow.classList.remove('bt-mouse-target');
+            mouseTargetRow = null;
+        };
         const onUserHover = (e) => {
             if (!e.isTrusted) return;
             const li = e.target && e.target.closest
                 && e.target.closest('.listitem');
-            if (!li || li === lastPrimedRow) return;
+            if (!li) return;
+            if (li !== mouseTargetRow) {
+                clearMouseTargetRow();
+                li.classList.add('bt-mouse-target');
+                mouseTargetRow = li;
+            }
+            if (li === lastPrimedRow) return;
             lastPrimedRow = li;
             // Defer one frame so Thymer has time to reposition the
             // shared link-menu over the newly-hovered row before we
@@ -3931,6 +3626,7 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
         this.cleanupMethods.push(() => {
             outlineTarget.removeEventListener('pointermove', onUserHover, true);
             outlineTarget.removeEventListener('mouseover', onUserHover, true);
+            clearMouseTargetRow();
         });
 
         // ---------- GUID resolution + zoom ----------
@@ -4362,7 +4058,7 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             if (!target || !target.closest) return;
 
             const bullet = target.closest('.bt-bullet');
-            if (bullet && isBulletsEnabled) {
+            if (bullet && usesCustomOutlineMode()) {
                 const li = bullet.closest('.listitem');
                 if (li) {
                     e.preventDefault();
@@ -4373,7 +4069,7 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             }
 
             const caret = target.closest('.bt-caret');
-            if (caret && isTogglesEnabled) {
+            if (caret && usesCustomOutlineMode()) {
                 const li = caret.closest('.listitem');
                 if (li && li.classList.contains('bt-has-children')) {
                     e.preventDefault();
@@ -4411,82 +4107,12 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             outlineTarget.removeEventListener('click', outlineClickHandler, true);
         });
 
-        // Mirror drag-handle hover onto the anchored .listitem via the
-        // `bt-drag-hover` class. .link-menu (drag-handle's parent) is
-        // absolutely positioned outside .listitem's DOM subtree, so
-        // CSS :hover on the row drops the moment the cursor crosses
-        // onto the drag circle. Track the most recently hovered
-        // .listitem and reuse it as the anchor when the cursor is on
-        // the drag circle — more robust than resolving via the
-        // link-menu's data-guid (which can be stale or absent when
-        // Thymer is mid-repositioning the popup).
-        let lastHoveredLi = null;
-        let lastDragHoverLi = null;
-        const clearDragHover = () => {
-            if (lastDragHoverLi) {
-                lastDragHoverLi.classList.remove('bt-drag-hover');
-                lastDragHoverLi = null;
-            }
-        };
-        const onAnyMouseOver = (e) => {
-            const t = e.target;
-            if (!t || !t.closest) return;
-            // Remember any listitem we pass through so we can reuse it
-            // as the anchor when the pointer leaves .listitem for
-            // .item-drag-handle (a DOM-disjoint sibling).
-            const li = t.closest('.listitem');
-            if (li) lastHoveredLi = li;
-            if (!isEnabled || !isTogglesEnabled || !isBulletsEnabled) return;
-            const dh = t.closest('[class*="item-drag-handle"]');
-            if (!dh) {
-                // Mouse is somewhere other than the drag-handle — let
-                // CSS :hover drive the rectangle.
-                clearDragHover();
-                return;
-            }
-            // Prefer the link-menu's data-guid (the row it's anchored
-            // to); fall back to the last-hovered listitem if the menu
-            // hasn't got a guid yet or the lookup fails.
-            let anchor = null;
-            const menu = dh.closest('.link-menu');
-            const guid = menu && menu.getAttribute('data-guid');
-            if (guid) {
-                anchor = document.querySelector(
-                    `.listitem[data-guid="${CSS.escape(guid)}"]`);
-            }
-            if (!anchor) anchor = lastHoveredLi;
-            if (!anchor) return;
-            if (anchor === lastDragHoverLi) return;
-            clearDragHover();
-            anchor.classList.add('bt-drag-hover');
-            lastDragHoverLi = anchor;
-        };
-        const onAnyMouseOut = (e) => {
-            if (!lastDragHoverLi) return;
-            const to = e.relatedTarget;
-            // Still inside the drag-handle or the anchored listitem →
-            // keep the class.
-            if (to && to.closest) {
-                if (to.closest('[class*="item-drag-handle"]')) return;
-                if (to.closest('.listitem') === lastDragHoverLi) return;
-            }
-            clearDragHover();
-        };
-        document.addEventListener('mouseover', onAnyMouseOver, true);
-        document.addEventListener('mouseout', onAnyMouseOut, true);
-        this.cleanupMethods.push(() => {
-            document.removeEventListener('mouseover', onAnyMouseOver, true);
-            document.removeEventListener('mouseout', onAnyMouseOut, true);
-            clearDragHover();
-            lastHoveredLi = null;
-        });
-
         // Cursor-placement guard. See forwardCursorPastMarker above — this
         // listener covers the click / arrow-navigation path. The new-row
         // path is handled inline in injectMarker. Single shared helper so
         // behaviour stays consistent across both entry points.
         const onSelectionChange = () => {
-            if (!isEnabled || (!isTogglesEnabled && !isBulletsEnabled)) return;
+            if (!usesCustomOutlineMode()) return;
             forwardCursorPastMarker();
         };
         document.addEventListener('selectionchange', onSelectionChange);
@@ -4505,6 +4131,7 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
         const setKeyboardActive = () => {
             if (this.isUnloaded) return;
             document.body.classList.add('bt-keyboard-active');
+            clearMouseTargetRow();
         };
         const clearKeyboardActive = () => {
             if (this.isUnloaded) return;
@@ -4516,6 +4143,7 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             document.removeEventListener('keydown', setKeyboardActive, true);
             document.removeEventListener('mousemove', clearKeyboardActive, true);
             document.body.classList.remove('bt-keyboard-active');
+            clearMouseTargetRow();
         });
 
         // Line-item created hook: when a new line is created while zoomed
@@ -4601,6 +4229,11 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                     || newSettings.threadingMode === 'stretched')) {
                 threadingMode = newSettings.threadingMode;
             }
+            if (newSettings.isOutlineControlsEnabled !== undefined) {
+                const enabled = !!newSettings.isOutlineControlsEnabled;
+                isBulletsEnabled = enabled;
+                isTogglesEnabled = enabled;
+            }
             if (newSettings.isBulletsEnabled !== undefined) isBulletsEnabled = !!newSettings.isBulletsEnabled;
             if (newSettings.isTogglesEnabled !== undefined) isTogglesEnabled = !!newSettings.isTogglesEnabled;
             if (newSettings.isHoverFrameEnabled !== undefined) isHoverFrameEnabled = !!newSettings.isHoverFrameEnabled;
@@ -4631,15 +4264,18 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             } else {
                 clearListColors();
             }
-            // Re-sync outline markers / classes when toggles change (or the
-            // master switch flips). Disabled-state teardown is handled by
+            // Re-sync outline markers / classes when the combined outline
+            // controls mode changes (or the master switch flips).
+            // Disabled-state teardown is handled by
             // annotateAll() itself.
-            if (newSettings.isBulletsEnabled !== undefined
+            if (newSettings.isOutlineControlsEnabled !== undefined
+                || newSettings.isBulletsEnabled !== undefined
                 || newSettings.isTogglesEnabled !== undefined
                 || newSettings.isEnabled !== undefined) {
-                // If disabling toggles, clear any collapsed rows first so
+                // If disabling custom outline controls, clear any collapsed rows first so
                 // hidden descendants come back immediately.
-                if (newSettings.isTogglesEnabled !== undefined && !isTogglesEnabled) {
+                if ((newSettings.isOutlineControlsEnabled !== undefined && !usesCustomOutlineMode())
+                    || (newSettings.isTogglesEnabled !== undefined && !isTogglesEnabled)) {
                     document.querySelectorAll('.listitem.bt-collapsed').forEach(el => {
                         el.classList.remove('bt-collapsed');
                     });
@@ -4658,7 +4294,8 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
                 colorSchemes, opacityPresets,
                 getSettings: () => ({
                     currentScheme, currentWidth, activeWidth, currentOpacity,
-                    isEnabled, threadingMode, isBulletsEnabled, isTogglesEnabled,
+                    isEnabled, threadingMode,
+                    isOutlineControlsEnabled: isBulletsEnabled && isTogglesEnabled,
                     bulletColorMode, isHoverFrameEnabled,
                     isRememberFoldsEnabled, isHideEmptyMarkersEnabled
                 }),
@@ -5175,10 +4812,11 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             const colors = api.colorSchemes[s.currentScheme]?.colors || [];
             const barWidth = Math.max(0, parseFloat(s.currentWidth));
             const opacity = parseFloat(s.currentOpacity);
-            // Mirror the production outline features so the preview reacts
-            // live to the Bullets / Chevrons / Bullet Color toggles.
-            const showToggles = !!s.isTogglesEnabled;
-            const showBullets = !!s.isBulletsEnabled;
+            // Preview the current contract: the custom bullet + chevron
+            // controls render together or not at all.
+            const showOutlineControls = !!s.isOutlineControlsEnabled;
+            const showToggles = showOutlineControls;
+            const showBullets = showOutlineControls;
             const bulletColorMode = s.bulletColorMode || 'always';
             const CARET_W = 14;
             const BULLET_W = 10;
@@ -5458,22 +5096,22 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
         outlineCard.appendChild(outlineTitle);
         const outlineCopy = document.createElement('p');
         outlineCopy.className = 'ir-card-copy';
-        outlineCopy.textContent = 'Add Workflowy-style bullets (click to zoom into a row) and disclosure chevrons (click to collapse rows with sub-items).';
+        outlineCopy.textContent = 'Enable the Workflowy-style outline controls: bullets for zooming into a row and disclosure chevrons for collapsing rows with sub-items.';
         outlineCard.appendChild(outlineCopy);
 
-        const bulletsCheckbox = document.createElement('input');
-        bulletsCheckbox.type = 'checkbox';
-        bulletsCheckbox.className = 'ir-checkbox';
-        bulletsCheckbox.checked = !!currentSettings.isBulletsEnabled;
-        bulletsCheckbox.addEventListener('change', (e) => {
-            currentSettings.isBulletsEnabled = e.target.checked;
-            api.updateSettings({ isBulletsEnabled: e.target.checked });
+        const outlineControlsCheckbox = document.createElement('input');
+        outlineControlsCheckbox.type = 'checkbox';
+        outlineControlsCheckbox.className = 'ir-checkbox';
+        outlineControlsCheckbox.checked = !!currentSettings.isOutlineControlsEnabled;
+        outlineControlsCheckbox.addEventListener('change', (e) => {
+            currentSettings.isOutlineControlsEnabled = e.target.checked;
+            api.updateSettings({ isOutlineControlsEnabled: e.target.checked });
             renderPreview(currentSettings);
         });
         outlineCard.appendChild(createField(
-            'Workflowy Bullets',
-            'Click a bullet to zoom into that row. Headings, text, and list items all get bullets.',
-            bulletsCheckbox
+            'Workflowy Outline Controls',
+            'Enable the custom bullet + chevron pair together. When off, Thymer uses its native controls.',
+            outlineControlsCheckbox
         ));
 
         // Bullet Color mode (tri-state): neutral / hover / always.
@@ -5505,21 +5143,6 @@ body.ir-enabled.ir-hide-empty-markers .listitem.bt-empty.bt-focused > .bt-marker
             'Bullet Color',
             'How the row bullet picks up your indent rainbow palette.',
             bulletColorSelect
-        ));
-
-        const togglesCheckbox = document.createElement('input');
-        togglesCheckbox.type = 'checkbox';
-        togglesCheckbox.className = 'ir-checkbox';
-        togglesCheckbox.checked = !!currentSettings.isTogglesEnabled;
-        togglesCheckbox.addEventListener('change', (e) => {
-            currentSettings.isTogglesEnabled = e.target.checked;
-            api.updateSettings({ isTogglesEnabled: e.target.checked });
-            renderPreview(currentSettings);
-        });
-        outlineCard.appendChild(createField(
-            'Disclosure Chevrons',
-            'Show a chevron on rows that have sub-items; click to collapse / expand.',
-            togglesCheckbox
         ));
 
         const hoverFrameCheckbox = document.createElement('input');
