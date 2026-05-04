@@ -77,6 +77,8 @@ var plugins = (() => {
       this.markerObserver = null;
       this.caretObserver = null;
       this.lastPointerPoint = null;
+      this.activeThreadFollowMode = "pointer";
+      this.pendingKeyboardThreadFollow = false;
       this.pendingMarkerGuids = /* @__PURE__ */ new Set();
       this.fullMarkerRefreshRequested = true;
       this.viewportSyncRaf = 0;
@@ -112,6 +114,16 @@ var plugins = (() => {
         return true;
       };
       this.flowythymerInspectPointer = () => this.inspectPointer();
+      this.flowythymerInspectNativeZoom = (guid) => this.inspectNativeZoomTarget(guid);
+      globalThis.flowythymerRetainMenu = this.flowythymerRetainMenu;
+      globalThis.flowythymerClearRetainMenu = this.flowythymerClearRetainMenu;
+      globalThis.flowythymerToggleMenuState = this.flowythymerToggleMenuState;
+      globalThis.flowythymerSetPalette = this.flowythymerSetPalette;
+      globalThis.flowythymerSetActiveThread = this.flowythymerSetActiveThread;
+      globalThis.flowythymerOpenSettings = this.flowythymerOpenSettings;
+      globalThis.flowythymerEnableDiagnostics = this.flowythymerEnableDiagnostics;
+      globalThis.flowythymerInspectPointer = this.flowythymerInspectPointer;
+      globalThis.flowythymerInspectNativeZoom = this.flowythymerInspectNativeZoom;
       this.clickHandler = (event) => {
         const target = event.target;
         if (!(target instanceof Element)) return;
@@ -120,7 +132,6 @@ var plugins = (() => {
         if (marker) {
           event.preventDefault();
           event.stopPropagation();
-          this.zoomIntoMarkerRow(marker.getAttribute("data-guid"));
           return;
         }
         const action = target.closest(".link-menu-action-collapse, .link-menu-action-expand");
@@ -139,13 +150,31 @@ var plugins = (() => {
       };
       document.addEventListener("click", this.clickHandler, true);
       this.pointerDownHandler = (event) => {
+        const target = event.target;
+        if (target instanceof Element && target.closest(".flowythymer-marker[data-guid]")) {
+          event.preventDefault();
+          event.stopPropagation();
+          this.zoomIntoMarkerRow(target.closest(".flowythymer-marker[data-guid]")?.getAttribute("data-guid"));
+          return;
+        }
         this.captureChevronIntent(event);
       };
       document.addEventListener("pointerdown", this.pointerDownHandler, true);
+      this.mouseDownHandler = (event) => {
+        const target = event.target;
+        if (!(target instanceof Element) || !target.closest(".flowythymer-marker[data-guid]")) return;
+        event.preventDefault();
+        event.stopPropagation();
+      };
+      document.addEventListener("mousedown", this.mouseDownHandler, true);
       this.pointerMoveHandler = (event) => {
+        const pointerMoved = !this.lastPointerPoint || this.lastPointerPoint.x !== event.clientX || this.lastPointerPoint.y !== event.clientY;
         this.lastPointerPoint = { x: event.clientX, y: event.clientY };
+        const followModeChanged = pointerMoved ? this.setActiveThreadFollowMode("pointer") : false;
+        if (pointerMoved) this.pendingKeyboardThreadFollow = false;
         const hoveredGuid = this.getResolvedHoverGuid(event.target, event.clientX, event.clientY);
         this.setHoveredGuid(hoveredGuid);
+        if (followModeChanged && hoveredGuid === this.hoveredGuid) this.updateActiveThread();
         if (!this.retainedGuid) return;
         if (!this.isPointInsideRetainedRow(event.clientX, event.clientY)) this.clearRetainedMenu();
       };
@@ -169,6 +198,7 @@ var plugins = (() => {
       window.visualViewport?.addEventListener?.("resize", this.mobileViewportSyncHandler, true);
       this.keyDownHandler = (event) => {
         this.clearRetainedMenu();
+        if (this.isKeyboardThreadNavigationEvent(event)) this.pendingKeyboardThreadFollow = true;
         if (event.key !== "Tab") return;
         this.invalidateMarkerPositionCache();
         this.scheduleMarkerUpdate();
@@ -183,7 +213,9 @@ var plugins = (() => {
       };
       document.addEventListener("keydown", this.keyDownHandler, true);
       this.keyUpHandler = () => {
-        if (this.updateFocusedGuid()) this.updateActiveThread();
+        const focusChanged = this.updateFocusedGuid(this.pendingKeyboardThreadFollow ? "keyboard" : null);
+        this.pendingKeyboardThreadFollow = false;
+        if (focusChanged) this.updateActiveThread();
       };
       document.addEventListener("keyup", this.keyUpHandler, true);
       this.registerSettingsEntryPoints();
@@ -191,7 +223,7 @@ var plugins = (() => {
       this.scheduleMarkerUpdate();
       const editorContainer = this.getEditorContainer();
       this.markerObserver = new MutationObserver((mutations) => {
-        const focusChanged = this.updateFocusedGuid();
+        const focusChanged = this.updateFocusedGuid(this.pendingKeyboardThreadFollow ? "keyboard" : null);
         if (focusChanged && !this.markerRaf) this.updateActiveThread();
         const relevantMutations = mutations.filter((mutation) => !this.isPluginIndentCorrectionMutation(mutation));
         if (!relevantMutations.length) return;
@@ -213,7 +245,7 @@ var plugins = (() => {
       });
       this.caretObserver = new MutationObserver((mutations) => {
         if (!mutations.some((mutation) => mutation.attributeName === "class")) return;
-        const focusChanged = this.updateFocusedGuid();
+        const focusChanged = this.updateFocusedGuid(this.pendingKeyboardThreadFollow ? "keyboard" : null);
         if (focusChanged || mutations.some((mutation) => mutation.target instanceof Element && mutation.target.classList.contains("listitem-with-caret"))) {
           this.updateActiveThread();
         }
@@ -356,13 +388,16 @@ var plugins = (() => {
 			.flowythymer-settings-inline-toggle strong { font-size: 0.95em; }
 			.flowythymer-settings-inline-toggle span { display: block; margin-top: 4px; color: var(--flowythymer-settings-text-muted); font-size: 0.9em; line-height: 1.4; }
 			.flowythymer-settings-control-block { display: grid; gap: 10px; }
+			.flowythymer-settings-card-options { display: grid; gap: 12px; }
 			.flowythymer-settings-input { width: 100%; min-height: 40px; padding: 8px 12px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--flowythymer-settings-border) 72%, transparent); background: var(--input-bg-color, var(--flowythymer-settings-surface)); color: var(--flowythymer-settings-text); font: inherit; }
 			.flowythymer-settings-checkbox { width: 22px; height: 22px; accent-color: var(--flowythymer-settings-accent); flex-shrink: 0; }
 			.flowythymer-settings-slider { width: 100%; }
 			.flowythymer-settings-slider-meta { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; color: var(--flowythymer-settings-text-muted); font-size: 0.92em; }
 			.flowythymer-settings-pill { padding: 3px 10px; border-radius: 999px; background: color-mix(in srgb, var(--flowythymer-settings-accent) 14%, var(--flowythymer-settings-surface)); color: var(--flowythymer-settings-accent); font-weight: 700; font-size: 0.85em; }
-			.flowythymer-settings-choice-layout { display: grid; grid-template-columns: 1fr; }
+			.flowythymer-settings-choice-layout { display: grid; grid-template-columns: 1fr; gap: 12px; align-items: start; }
+			.flowythymer-settings-choice-layout.flowythymer-settings-choice-layout-stacked { grid-template-columns: 1fr; }
 			.flowythymer-settings-choice-list { display: grid; gap: 8px; }
+			.flowythymer-settings-choice-list[data-columns="2"] { grid-template-columns: 1fr; }
 			.flowythymer-settings-choice { width: 100%; text-align: left; padding: 11px 12px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--flowythymer-settings-border) 72%, transparent); background: color-mix(in srgb, var(--flowythymer-settings-surface-strong) 92%, var(--flowythymer-settings-surface)); color: var(--flowythymer-settings-text); cursor: pointer; display: grid; gap: 4px; }
 			.flowythymer-settings-choice[data-selected="true"] { border-color: color-mix(in srgb, var(--flowythymer-settings-accent) 65%, var(--flowythymer-settings-border)); background: color-mix(in srgb, var(--flowythymer-settings-accent) 10%, var(--flowythymer-settings-surface)); color: var(--flowythymer-settings-text); }
 			.flowythymer-settings-choice strong { font-size: 0.94em; }
@@ -386,8 +421,15 @@ var plugins = (() => {
 			.flowythymer-settings-preview-lines[data-mode="stretched"] i:nth-child(1) { width: 10px; height: 2px; opacity: 0.45; }
 			.flowythymer-settings-preview-lines[data-mode="stretched"] i:nth-child(2) { width: 24px; height: 2px; opacity: 0.7; }
 			.flowythymer-settings-preview-lines[data-mode="stretched"] i:nth-child(3) { width: 36px; height: 2px; opacity: 1; }
+			@media (min-width: 720px) {
+				.flowythymer-settings-card-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+				.flowythymer-settings-choice-layout:not(.flowythymer-settings-choice-layout-stacked) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+				.flowythymer-settings-choice-list[data-columns="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+			}
 			@media (max-width: 720px) {
-				.flowythymer-settings-choice-layout { grid-template-columns: 1fr; }
+				.flowythymer-settings-card-options,
+				.flowythymer-settings-choice-layout,
+				.flowythymer-settings-choice-list[data-columns="2"] { grid-template-columns: 1fr; }
 			}
 		`;
       element.appendChild(style);
@@ -527,6 +569,7 @@ var plugins = (() => {
       bulletStyleLayout.className = "flowythymer-settings-choice-layout";
       const bulletChoiceList = document.createElement("div");
       bulletChoiceList.className = "flowythymer-settings-choice-list";
+      bulletChoiceList.dataset.columns = "2";
       bulletChoiceList.appendChild(createChoiceButton({
         title: "FlowyThymer bullets",
         description: "",
@@ -552,6 +595,8 @@ var plugins = (() => {
       appendInlineToggle(indentToggleCard, "Show indent lines", "", indentEnabled);
       if (this.settings.indentLinesEnabled) {
         const indentCard = createCard("Indent line options", "", "dependent");
+        const indentOptionsGrid = document.createElement("div");
+        indentOptionsGrid.className = "flowythymer-settings-card-options";
         const widthGroup = document.createElement("div");
         const widthMeta = document.createElement("div");
         widthMeta.className = "flowythymer-settings-slider-meta";
@@ -576,7 +621,7 @@ var plugins = (() => {
           this.updateSettings({ indentLineWidth: value });
         });
         widthGroup.appendChild(widthSlider);
-        appendControlBlock(indentCard, widthGroup, "Line thickness");
+        appendControlBlock(indentOptionsGrid, widthGroup, "Line thickness");
         const opacityGroup = document.createElement("div");
         const opacityMeta = document.createElement("div");
         opacityMeta.className = "flowythymer-settings-slider-meta";
@@ -601,7 +646,8 @@ var plugins = (() => {
           this.updateSettings({ indentLineOpacity: value });
         });
         opacityGroup.appendChild(opacitySlider);
-        appendControlBlock(indentCard, opacityGroup, "Line visibility");
+        appendControlBlock(indentOptionsGrid, opacityGroup, "Line visibility");
+        indentCard.appendChild(indentOptionsGrid);
       }
       const activeThreadToggleCard = createCard("Active thread");
       const activeThreadEnabled = document.createElement("input");
@@ -614,10 +660,13 @@ var plugins = (() => {
       appendInlineToggle(activeThreadToggleCard, "Show active thread", "", activeThreadEnabled);
       if (this.settings.activeThread) {
         const threadCard = createCard("Active thread options", "", "dependent");
+        const threadOptionsGrid = document.createElement("div");
+        threadOptionsGrid.className = "flowythymer-settings-card-options";
         const threadModeLayout = document.createElement("div");
         threadModeLayout.className = "flowythymer-settings-choice-layout";
         const threadChoiceList = document.createElement("div");
         threadChoiceList.className = "flowythymer-settings-choice-list";
+        threadChoiceList.dataset.columns = "2";
         threadChoiceList.appendChild(createChoiceButton({
           title: "Step by step",
           description: "",
@@ -635,7 +684,8 @@ var plugins = (() => {
           this.settings.activeThreadMode === "stretched" ? "Stretch to active row" : "Step by step"
         );
         threadPreviewCard.appendChild(createThreadPreview(this.settings.activeThreadMode));
-        appendControlBlock(threadCard, threadModeLayout, "Thread style");
+        threadModeLayout.appendChild(threadPreviewCard);
+        appendControlBlock(threadOptionsGrid, threadModeLayout, "Thread style");
         const threadWidthGroup = document.createElement("div");
         const threadWidthMeta = document.createElement("div");
         threadWidthMeta.className = "flowythymer-settings-slider-meta";
@@ -660,13 +710,15 @@ var plugins = (() => {
           this.updateSettings({ activeThreadWidth: value });
         });
         threadWidthGroup.appendChild(threadWidthSlider);
-        appendControlBlock(threadCard, threadWidthGroup, "Thread thickness");
+        appendControlBlock(threadOptionsGrid, threadWidthGroup, "Thread thickness");
+        threadCard.appendChild(threadOptionsGrid);
       }
       const paletteCard = createCard("Color palette");
       const paletteLayout = document.createElement("div");
-      paletteLayout.className = "flowythymer-settings-choice-layout";
+      paletteLayout.className = "flowythymer-settings-choice-layout flowythymer-settings-choice-layout-stacked";
       const paletteChoiceList = document.createElement("div");
       paletteChoiceList.className = "flowythymer-settings-choice-list";
+      paletteChoiceList.dataset.columns = "2";
       Object.keys(PALETTES).forEach((key) => {
         paletteChoiceList.appendChild(createChoiceButton({
           title: this.formatPaletteLabel(key),
@@ -675,7 +727,6 @@ var plugins = (() => {
           onSelect: /* @__PURE__ */ __name(() => updateSettingsAndRefresh({ palette: key }), "onSelect")
         }));
       });
-      paletteLayout.appendChild(paletteChoiceList);
       const palettePreview = createLiveCard(this.formatPaletteLabel(this.settings.palette));
       const palettePreviewWrap = document.createElement("div");
       palettePreviewWrap.className = "flowythymer-settings-palette-preview";
@@ -689,6 +740,7 @@ var plugins = (() => {
       palettePreviewWrap.appendChild(palettePreviewRow);
       palettePreview.appendChild(palettePreviewWrap);
       paletteLayout.appendChild(palettePreview);
+      paletteLayout.appendChild(paletteChoiceList);
       appendControlBlock(paletteCard, paletteLayout);
       container.appendChild(settingsGrid);
       element.appendChild(container);
@@ -833,6 +885,38 @@ var plugins = (() => {
     isPluginIndentCorrectionMutation(mutation) {
       return false;
     }
+    setActiveThreadFollowMode(mode) {
+      const normalizedMode = mode === "keyboard" ? "keyboard" : "pointer";
+      if (this.activeThreadFollowMode === normalizedMode) return false;
+      this.activeThreadFollowMode = normalizedMode;
+      return true;
+    }
+    isThymerEditorKeyboardContext(event) {
+      const editorContainer = this.getEditorContainer();
+      const eventTarget = event?.target;
+      if (eventTarget instanceof Element && editorContainer.contains(eventTarget)) return true;
+      const activeElement = document.activeElement;
+      if (activeElement instanceof Element && editorContainer.contains(activeElement)) return true;
+      if (editorContainer.querySelector(".listitem-with-caret[data-guid]")) return true;
+      const virtualInput = document.getElementById("virtualinput-wrapper");
+      const transform = virtualInput?.style?.transform || "";
+      if (transform.includes("translate(") && this.getFocusedRowGuid()) return true;
+      return false;
+    }
+    isKeyboardThreadNavigationEvent(event) {
+      if (event.metaKey || event.ctrlKey || event.altKey) return false;
+      if (!this.isThymerEditorKeyboardContext(event)) return false;
+      return [
+        "ArrowUp",
+        "ArrowDown",
+        "Tab",
+        "Enter"
+      ].includes(event.key);
+    }
+    getActiveThreadTargetGuid() {
+      if (this.activeThreadFollowMode === "keyboard" && this.focusedGuid) return this.focusedGuid;
+      return this.hoveredGuid || this.focusedGuid;
+    }
     updateActiveThread() {
       this.updateFocusedGuid();
       const targetRows = /* @__PURE__ */ new Set();
@@ -842,7 +926,7 @@ var plugins = (() => {
         this.applyActiveThreadClasses(targetRows, pathRows, connectorTargets, []);
         return;
       }
-      const targetGuid = this.hoveredGuid || this.focusedGuid;
+      const targetGuid = this.getActiveThreadTargetGuid();
       if (!targetGuid) {
         this.applyActiveThreadClasses(targetRows, pathRows, connectorTargets, []);
         return;
@@ -1050,10 +1134,11 @@ var plugins = (() => {
       const firstLineHeight = Number.isFinite(lineHeight) ? lineHeight : fontSize * 1.2;
       return lineRect.height > firstLineHeight * 1.4;
     }
-    updateFocusedGuid() {
+    updateFocusedGuid(source = null) {
       const nextFocusedGuid = this.getEditorContainer().querySelector(".listitem-with-caret[data-guid]")?.getAttribute("data-guid") || this.getFocusedRowGuid();
       if (nextFocusedGuid !== this.focusedGuid) {
         this.focusedGuid = nextFocusedGuid;
+        if (source === "keyboard" && nextFocusedGuid) this.setActiveThreadFollowMode("keyboard");
         return true;
       }
       return false;
@@ -1487,46 +1572,80 @@ var plugins = (() => {
       if (!guid) return null;
       return document.querySelector(`.link-menu.item-drag-handle-editor-style[data-guid="${CSS.escape(guid)}"]`);
     }
-    zoomIntoMarkerRow(guid) {
-      const row = document.querySelector(`.listitem[data-guid="${CSS.escape(guid)}"]`);
-      if (!row) return;
-      const menu = this.getMenuForGuid(guid) || document.querySelector(".link-menu.item-drag-handle-editor-style") || document.querySelector(".link-menu");
+    getMenuOpenerForGuid(guid) {
+      if (!guid) return null;
+      return document.querySelector([
+        `.item-drag-handle.clickable.link-menu-opener[data-guid="${CSS.escape(guid)}"]`,
+        `.link-menu-opener[data-guid="${CSS.escape(guid)}"]`
+      ].join(", "));
+    }
+    getNativeZoomMenuElements(guid) {
+      const row = this.getRowByGuid(guid);
+      const rowRect = row?.getBoundingClientRect?.() || null;
+      const menu = this.getMenuForGuid(guid) || document.querySelector(".link-menu.item-drag-handle-editor-style[data-guid]") || document.querySelector(".link-menu.item-drag-handle-editor-style") || document.querySelector(".link-menu");
       const zoomAction = menu?.querySelector?.(".link-menu-action-zoom") || document.querySelector(".link-menu-action-zoom");
-      if (!menu || !zoomAction) {
-        row.querySelector(".line-div")?.dispatchEvent(new MouseEvent("dblclick", {
-          bubbles: true,
-          cancelable: true,
-          composed: true,
-          view: window
-        }));
-        return;
-      }
+      if (!menu || !zoomAction) return null;
+      return { menu, zoomAction, rowRect };
+    }
+    prepareNativeZoomInteraction(guid) {
+      const row = this.getRowByGuid(guid);
+      if (!row) return null;
+      const nativeZoom = this.getNativeZoomMenuElements(guid);
+      if (!nativeZoom) return null;
+      const { menu, zoomAction, rowRect } = nativeZoom;
+      const lineDiv = row.querySelector(".line-div");
       const previousGuid = menu.getAttribute("data-guid");
-      const wasVisible = menu.classList.contains("link-menu-visible");
+      const previousMenuClassName = menu.className;
+      const previousMenuStyle = menu.getAttribute("style");
+      const previousZoomStyle = zoomAction.getAttribute("style");
       const bodyWasOpen = document.body.classList.contains("editor-drag-handle-open");
-      const previousTop = menu.style.top;
-      const previousLeft = menu.style.left;
-      const previousDisplay = zoomAction.style.display;
-      const previousVisibility = zoomAction.style.visibility;
-      const rowRect = row.getBoundingClientRect();
       menu.setAttribute("data-guid", guid);
-      menu.classList.add("link-menu-visible");
+      menu.classList.add("item-drag-handle-style", "item-drag-handle-editor-style", "hide-for-editor", "show-zoom", "link-menu-visible");
+      if (this.isFoldedRow(row, guid)) {
+        menu.classList.remove("show-collapse");
+        menu.classList.add("show-expand");
+      } else {
+        menu.classList.remove("show-expand");
+        menu.classList.add("show-collapse");
+      }
       document.body.classList.add("editor-drag-handle-open");
-      menu.style.setProperty("top", `${rowRect.top + rowRect.height / 2}px`, "important");
-      menu.style.setProperty("left", `${rowRect.left}px`, "important");
-      zoomAction.style.setProperty("display", "flex", "important");
-      zoomAction.style.setProperty("visibility", "hidden", "important");
-      this.fullClick(zoomAction);
-      zoomAction.style.display = previousDisplay;
-      zoomAction.style.visibility = previousVisibility;
-      if (!wasVisible) menu.classList.remove("link-menu-visible");
-      if (!bodyWasOpen) document.body.classList.remove("editor-drag-handle-open");
-      if (previousGuid) menu.setAttribute("data-guid", previousGuid);
-      else menu.removeAttribute("data-guid");
-      if (previousTop) menu.style.top = previousTop;
-      else menu.style.removeProperty("top");
-      if (previousLeft) menu.style.left = previousLeft;
-      else menu.style.removeProperty("left");
+      if (rowRect) {
+        menu.style.setProperty("top", `${Math.round(rowRect.top - 4)}px`, "important");
+        menu.style.setProperty("left", `${Math.round(rowRect.left + 3)}px`, "important");
+      }
+      menu.style.setProperty("opacity", "0", "important");
+      menu.style.setProperty("pointer-events", "none", "important");
+      zoomAction.style.setProperty("display", "block", "important");
+      zoomAction.style.setProperty("visibility", "visible", "important");
+      zoomAction.style.setProperty("pointer-events", "auto", "important");
+      zoomAction.style.setProperty("opacity", "1", "important");
+      if (lineDiv) this.positionRowMenu(row, guid, lineDiv);
+      return {
+        menu,
+        zoomAction,
+        restore: /* @__PURE__ */ __name(() => {
+          if (previousGuid) menu.setAttribute("data-guid", previousGuid);
+          else menu.removeAttribute("data-guid");
+          menu.className = previousMenuClassName;
+          if (previousMenuStyle == null) menu.removeAttribute("style");
+          else menu.setAttribute("style", previousMenuStyle);
+          if (previousZoomStyle == null) zoomAction.removeAttribute("style");
+          else zoomAction.setAttribute("style", previousZoomStyle);
+          if (!bodyWasOpen) document.body.classList.remove("editor-drag-handle-open");
+        }, "restore")
+      };
+    }
+    async zoomIntoMarkerRow(guid) {
+      const interaction = this.prepareNativeZoomInteraction(guid);
+      if (!interaction) return;
+      const { zoomAction, restore } = interaction;
+      try {
+        await this.waitForAnimationFrames(1);
+        this.fullClick(zoomAction);
+        await this.waitForAnimationFrames(1);
+      } finally {
+        restore();
+      }
     }
     fullClick(element) {
       const rect = element.getBoundingClientRect();
@@ -1551,6 +1670,135 @@ var plugins = (() => {
       element.dispatchEvent(new PointerEvent("pointerup", pointerOptions));
       element.dispatchEvent(new MouseEvent("mouseup", options));
       element.dispatchEvent(new MouseEvent("click", options));
+    }
+    waitForAnimationFrames(count = 1) {
+      const total = Math.max(1, Number.isFinite(count) ? Math.floor(count) : 1);
+      return new Promise((resolve) => {
+        const step = /* @__PURE__ */ __name((remaining) => {
+          requestAnimationFrame(() => {
+            if (remaining <= 1) resolve();
+            else step(remaining - 1);
+          });
+        }, "step");
+        step(total);
+      });
+    }
+    describeDiagnosticElement(element) {
+      if (!(element instanceof Element)) return null;
+      const rect = element.getBoundingClientRect?.();
+      const computed = getComputedStyle(element);
+      return {
+        tag: element.tagName.toLowerCase(),
+        id: element.id || null,
+        className: typeof element.className === "string" ? element.className : null,
+        dataGuid: element.getAttribute("data-guid"),
+        role: element.getAttribute("role"),
+        ariaLabel: element.getAttribute("aria-label"),
+        text: (element.textContent || "").trim().slice(0, 120) || null,
+        rect: rect ? {
+          left: Math.round(rect.left),
+          top: Math.round(rect.top),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height)
+        } : null,
+        selector: this.getDiagnosticSelector(element),
+        computed: {
+          display: computed.display,
+          visibility: computed.visibility,
+          opacity: computed.opacity,
+          pointerEvents: computed.pointerEvents,
+          cursor: computed.cursor
+        }
+      };
+    }
+    getDiagnosticSelector(element) {
+      if (!(element instanceof Element)) return null;
+      const tag = element.tagName.toLowerCase();
+      const id = element.id ? `#${element.id}` : "";
+      const classes = typeof element.className === "string" ? element.className.trim().split(/\s+/).filter(Boolean).slice(0, 4).map((name) => `.${name}`).join("") : "";
+      const guid = element.getAttribute("data-guid");
+      const guidSelector = guid ? `[data-guid="${guid}"]` : "";
+      return `${tag}${id}${classes}${guidSelector}`;
+    }
+    inspectPointer() {
+      const point = this.lastPointerPoint;
+      if (!point) {
+        console.warn("[FlowyThymer] No pointer position recorded yet. Move the pointer over the native zoom arrow and try again.");
+        return null;
+      }
+      const stack = typeof document.elementsFromPoint === "function" ? document.elementsFromPoint(point.x, point.y) : [document.elementFromPoint(point.x, point.y)].filter(Boolean);
+      const describedStack = stack.map((element) => this.describeDiagnosticElement(element)).filter(Boolean);
+      const nativeZoomElement = stack.find((element) => element instanceof Element && element.matches(".link-menu-action-zoom")) || null;
+      const result = {
+        point: { x: Math.round(point.x), y: Math.round(point.y) },
+        nativeZoomMatch: this.describeDiagnosticElement(nativeZoomElement),
+        stack: describedStack
+      };
+      console.groupCollapsed(`[FlowyThymer] Pointer inspection @ ${result.point.x}, ${result.point.y}`);
+      console.log(result);
+      console.groupEnd();
+      return result;
+    }
+    inspectNativeZoomTarget(guid = null) {
+      const resolvedGuid = guid || this.hoveredGuid || this.focusedGuid || null;
+      if (!resolvedGuid) {
+        console.warn("[FlowyThymer] No guid supplied and no hovered/focused row available for native zoom inspection.");
+        return null;
+      }
+      const menu = this.getMenuForGuid(resolvedGuid);
+      const zoomAction = menu?.querySelector?.(".link-menu-action-zoom") || null;
+      const opener = this.getMenuOpenerForGuid(resolvedGuid);
+      const menuChildren = menu ? [...menu.children].map((child) => this.describeDiagnosticElement(child)).filter(Boolean) : [];
+      const visibleMenuChildren = menuChildren.filter((child) => {
+        const rect = child?.rect;
+        const computed = child?.computed;
+        return rect && rect.width > 0 && rect.height > 0 && computed?.display !== "none" && computed?.visibility !== "hidden" && Number.parseFloat(computed?.opacity || "1") > 0.01;
+      });
+      const likelyArrowCandidates = visibleMenuChildren.filter((child) => {
+        const text = `${child?.className || ""} ${child?.ariaLabel || ""} ${child?.text || ""}`.toLowerCase();
+        return /zoom|arrow|external|north|up-right|open/.test(text) || child?.rect?.width && child?.rect?.height && Math.abs(child.rect.width - child.rect.height) <= 8;
+      });
+      const result = {
+        guid: resolvedGuid,
+        row: this.describeDiagnosticElement(this.getRowByGuid(resolvedGuid)),
+        menu: this.describeDiagnosticElement(menu),
+        zoomAction: this.describeDiagnosticElement(zoomAction),
+        opener: this.describeDiagnosticElement(opener),
+        menuChildren,
+        visibleMenuChildren,
+        likelyArrowCandidates,
+        zoomActionIsChildOfMenu: Boolean(menu && zoomAction && zoomAction.parentElement === menu),
+        zoomActionComputed: zoomAction ? {
+          display: getComputedStyle(zoomAction).display,
+          visibility: getComputedStyle(zoomAction).visibility,
+          opacity: getComputedStyle(zoomAction).opacity,
+          pointerEvents: getComputedStyle(zoomAction).pointerEvents
+        } : null
+      };
+      console.groupCollapsed(`[FlowyThymer] Native zoom inspection for ${resolvedGuid}`);
+      console.log(result);
+      if (typeof JSON !== "undefined") {
+        console.log("[FlowyThymer] Native zoom inspection JSON");
+        console.log(JSON.stringify(result, null, 2));
+      }
+      console.groupEnd();
+      return result;
+    }
+    installDiagnostics() {
+      const api = {
+        inspectPointer: /* @__PURE__ */ __name(() => this.inspectPointer(), "inspectPointer"),
+        inspectNativeZoom: /* @__PURE__ */ __name((guid) => this.inspectNativeZoomTarget(guid), "inspectNativeZoom"),
+        getLastPointerPoint: /* @__PURE__ */ __name(() => this.lastPointerPoint, "getLastPointerPoint"),
+        getHoveredGuid: /* @__PURE__ */ __name(() => this.hoveredGuid, "getHoveredGuid"),
+        getFocusedGuid: /* @__PURE__ */ __name(() => this.focusedGuid, "getFocusedGuid")
+      };
+      globalThis.flowythymerDiagnostics = api;
+      console.groupCollapsed("[FlowyThymer] Diagnostics enabled");
+      console.log("Use flowythymerInspectPointer() while hovering the native zoom arrow.");
+      console.log("Use flowythymerInspectNativeZoom(guid) for a specific row, or without args for hovered/focused row.");
+      console.log(api);
+      console.groupEnd();
+      return api;
     }
     isBlankRow(row) {
       const lineDiv = row?.querySelector?.(".line-div");
@@ -1619,6 +1867,7 @@ var plugins = (() => {
     onUnload() {
       if (this.clickHandler) document.removeEventListener("click", this.clickHandler, true);
       if (this.pointerDownHandler) document.removeEventListener("pointerdown", this.pointerDownHandler, true);
+      if (this.mouseDownHandler) document.removeEventListener("mousedown", this.mouseDownHandler, true);
       if (this.pointerMoveHandler) document.removeEventListener("pointermove", this.pointerMoveHandler, true);
       if (this.keyDownHandler) document.removeEventListener("keydown", this.keyDownHandler, true);
       if (this.keyUpHandler) document.removeEventListener("keyup", this.keyUpHandler, true);
@@ -1655,6 +1904,10 @@ var plugins = (() => {
       delete globalThis.flowythymerSetPalette;
       delete globalThis.flowythymerSetActiveThread;
       delete globalThis.flowythymerOpenSettings;
+      delete globalThis.flowythymerEnableDiagnostics;
+      delete globalThis.flowythymerInspectPointer;
+      delete globalThis.flowythymerInspectNativeZoom;
+      delete globalThis.flowythymerDiagnostics;
     }
   };
   return __toCommonJS(plugin_exports);
