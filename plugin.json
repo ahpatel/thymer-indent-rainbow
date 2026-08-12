@@ -1,8 +1,9 @@
 {
-    "version": "1.9.0",
+    "ver": 1,
+    "version": "2.0.0",
     "name": "Thymer Indent Rainbow",
     "icon": "ti-paint",
     "item_name": "Note",
-    "description": "Enhanced hierarchy visualization with rainbow-colored indent guides like IDEs",
-    "show_statusbar_items": true
+    "description": "Rainbow-colored vertical indent guides for Thymer's editor",
+    "show_cmdpal_items": true
 }
